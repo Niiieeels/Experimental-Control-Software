@@ -315,6 +315,7 @@ EVENT:
         'dac(4, adcdigits16(initialcurrent, 1))
         DAC(5, ADCDigits16(INITIALDIPOLEPOWER,1))
         DAC(6, ADCDigits16(INITIALRFDRIVERPOWER,1))
+        end
       ENDIF
                
       
@@ -365,6 +366,7 @@ EVENT:
             STATE_INDEX = 1
             CLOCK = 0
             Par_80 = 0
+            end
           ENDIF
           CLOCK = 0
           STATE_INDEX = 1
@@ -560,6 +562,7 @@ EVENT:
         dac(4, adcdigits16(initialcurrent, 1))
         DAC(5, ADCDigits16(INITIALDIPOLEPOWER,1))
         DAC(6, ADCDigits16(INITIALRFDRIVERPOWER,1))
+        end
       ENDIF
       
     case 5: 'measure number of atoms after compression
@@ -645,6 +648,7 @@ EVENT:
           DAC(3, ADCDigits16(INITIALDETUNING,1))
           DAC(5, ADCDigits16(INITIALDIPOLEPOWER,1))
           DAC(6, ADCDigits16(INITIALRFDRIVERPOWER,1))
+          end
         ENDIF
         if (state_index = 5) then
           CLOCK = 0
