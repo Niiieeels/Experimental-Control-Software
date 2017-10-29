@@ -1,0 +1,2668 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>886</width>
+    <height>1021</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout_3">
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_2">
+      <item>
+       <layout class="QVBoxLayout" name="verticalLayout_2">
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_12">
+          <item>
+           <widget class="QPushButton" name="allocation">
+            <property name="text">
+             <string>prepare Cam</string>
+            </property>
+            <property name="iconSize">
+             <size>
+              <width>16</width>
+              <height>10</height>
+             </size>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="camChoice"/>
+          </item>
+          <item>
+           <widget class="QPushButton" name="ADWinDialog">
+            <property name="text">
+             <string>ADWin sequences</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_10">
+          <item>
+           <widget class="QPushButton" name="startStream">
+            <property name="text">
+             <string>start Live View</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton">
+            <property name="text">
+             <string>start Triggered Mode</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_13">
+          <item>
+           <widget class="QPushButton" name="stopStream">
+            <property name="text">
+             <string>stop Live View</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_2">
+            <property name="text">
+             <string>stop Triggered Mode</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="GraphicsLayoutWidget" name="camPicture">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>400</width>
+            <height>300</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="GraphicsLayoutWidget" name="ROIShapeCurve">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>400</width>
+            <height>200</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="GraphicsLayoutWidget" name="ROISumPlot">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>300</width>
+          <height>300</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QVBoxLayout" name="verticalLayout_4">
+        <item>
+         <widget class="QLabel" name="label">
+          <property name="text">
+           <string>Average sample:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="SpinBox" name="averageSample">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="value">
+           <number>20</number>
+          </property>
+         </widget>
+        </item>
+        <item alignment="Qt::AlignTop">
+         <widget class="QPushButton" name="takeBackground">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="text">
+           <string>Take Background</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="resetBackground">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="text">
+           <string>Reset Background</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_5">
+          <property name="text">
+           <string>Scaling factor</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="SpinBox" name="scaling">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="automaticScaling">
+          <property name="text">
+           <string>Automatic scaling</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_6">
+          <property name="text">
+           <string>Detuning:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLCDNumber" name="detuning">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Minimum">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="averageCountInitiate">
+          <property name="text">
+           <string>Signal counts in 10^7</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLCDNumber" name="averageCount"/>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_15">
+          <property name="text">
+           <string>Pixelfly qe Exposure [ms]</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="SpinBox" name="exposureTime">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>65</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="value">
+           <number>35</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_47">
+          <property name="text">
+           <string>Pixelfly USB Exposure</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_17">
+          <item>
+           <widget class="QSpinBox" name="cam2exposureTime">
+            <property name="maximum">
+             <number>10000000</number>
+            </property>
+            <property name="value">
+             <number>1</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="cam2Timebase">
+            <property name="currentIndex">
+             <number>-1</number>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_19">
+          <property name="text">
+           <string>Saturation</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QDoubleSpinBox" name="saturation"/>
+        </item>
+        <item>
+         <widget class="QComboBox" name="checkboxes"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="startBlink">
+          <property name="text">
+           <string>startBlink</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="stopBlink">
+          <property name="text">
+           <string>stopBlink</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_52">
+          <property name="text">
+           <string>Blink time in secs</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="blinkperiod">
+          <property name="value">
+           <number>1</number>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout">
+      <item>
+       <layout class="QVBoxLayout" name="AnalogAndDigitalOuts">
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_6">
+          <item>
+           <widget class="AnalogOut" name="fiberLaserAnalogIn"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_31">
+            <property name="text">
+             <string>AnalogIn Fiber Laser</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="fiberLaserMod">
+            <property name="text">
+             <string>Fiber Laser Mod </string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="AnalogOut" name="RFdriveramp"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_32">
+            <property name="text">
+             <string>RF driver amplitude</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="RFdriverTTL">
+            <property name="text">
+             <string>RF driver TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="AnalogOut" name="zeemanVCO"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_37">
+            <property name="text">
+             <string>Zeeman VCO</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="AnalogOut" name="zeemanVCA"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_38">
+            <property name="text">
+             <string>Zeeman VCA</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_6">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_3">
+          <item>
+           <widget class="AnalogOut" name="vcaCooler">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>60</width>
+              <height>0</height>
+             </size>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_2">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>94</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>VCA Cooler</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="coolerTTL">
+            <property name="text">
+             <string>Cooler TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="ZeemanLightTTL">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>Zeeman light TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="motShutter">
+            <property name="text">
+             <string>MOT Shutter</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_3">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_4">
+          <item>
+           <widget class="AnalogOut" name="vcaRepumper">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>59</width>
+              <height>0</height>
+             </size>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_3">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>94</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>VCA Repumper</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="repumpTTL">
+            <property name="text">
+             <string>Repumper TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="cameraTTL">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>Camera TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="camera2TTL">
+            <property name="text">
+             <string>Camera 2 TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="zeemanShutter">
+            <property name="text">
+             <string>Imaging TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_2">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="MOTCoils">
+          <item>
+           <widget class="QSpinBox" name="motCoilCurrent">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>70</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="maximum">
+             <number>120</number>
+            </property>
+            <property name="value">
+             <number>60</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_8">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>MOT coil current amplitude</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="motCurrentTTL">
+            <property name="text">
+             <string>MOT coil current TTL</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="controlMode"/>
+          </item>
+          <item>
+           <widget class="QComboBox" name="operationMode"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_68">
+            <property name="text">
+             <string>Kniel delay time [µs]:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QSpinBox" name="knielDelayTime">
+            <property name="maximum">
+             <number>100000</number>
+            </property>
+            <property name="value">
+             <number>10400</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="showKnielSequence">
+            <property name="text">
+             <string>show Kniel Sequence</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_4">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_5">
+          <item>
+           <widget class="AnalogOut" name="vcoBeatOffset">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>58</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="value">
+             <number>0</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_4">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>94</width>
+              <height>0</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>VCO Beat Offset</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="OvenShutterTTL">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>Oven Shutter</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="DigitalInOut" name="ZeemanCurrentTTL">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="text">
+             <string>Zeeman Current</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <widget class="QLabel" name="label_7">
+      <property name="text">
+       <string>ADWin Sequences</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QTabWidget" name="delayTimes">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>210</height>
+       </size>
+      </property>
+      <property name="currentIndex">
+       <number>1</number>
+      </property>
+      <widget class="QWidget" name="ASyncModeTest">
+       <attribute name="title">
+        <string>Async Mode</string>
+       </attribute>
+       <widget class="QSpinBox" name="exposureAsync">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>60</y>
+          <width>101</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>5000</number>
+        </property>
+        <property name="value">
+         <number>500</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_51">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>30</y>
+          <width>91</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Exposure [µs]</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="startAsync">
+        <property name="geometry">
+         <rect>
+          <x>50</x>
+          <y>110</y>
+          <width>161</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>startAsync Mode Ext Trigger</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="stopAsync">
+        <property name="geometry">
+         <rect>
+          <x>50</x>
+          <y>140</y>
+          <width>161</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>stopAsyncMode Ext Trigger</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_5">
+       <attribute name="title">
+        <string>Absorption Imaging</string>
+       </attribute>
+       <widget class="QWidget" name="verticalLayoutWidget_3">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>109</y>
+          <width>221</width>
+          <height>64</height>
+         </rect>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_7">
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_14">
+           <item>
+            <widget class="QPushButton" name="takeDarkCnts">
+             <property name="text">
+              <string>take Dark Counts</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QSpinBox" name="darkCntAvg">
+             <property name="value">
+              <number>3</number>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_44">
+             <property name="text">
+              <string>Average</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_16">
+           <item>
+            <widget class="QPushButton" name="takeAbsorpImg">
+             <property name="text">
+              <string>take Absorption Image</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="horizontalLayoutWidget_4">
+        <property name="geometry">
+         <rect>
+          <x>30</x>
+          <y>10</y>
+          <width>386</width>
+          <height>80</height>
+         </rect>
+        </property>
+        <layout class="QHBoxLayout" name="horizontalLayout_15">
+         <item>
+          <layout class="QVBoxLayout" name="verticalLayout_8">
+           <item>
+            <widget class="QLabel" name="label_45">
+             <property name="text">
+              <string>Resonant VCO voltage</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QDoubleSpinBox" name="resVcoVolt">
+             <property name="value">
+              <double>9.670000000000000</double>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QVBoxLayout" name="verticalLayout_6">
+           <item>
+            <widget class="QLabel" name="label_43">
+             <property name="text">
+              <string>Exposure Time [µs]</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QSpinBox" name="absorpImgExpTime">
+             <property name="maximum">
+              <number>5000</number>
+             </property>
+             <property name="value">
+              <number>500</number>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QVBoxLayout" name="verticalLayout_9">
+           <item>
+            <widget class="QLabel" name="label_46">
+             <property name="text">
+              <string>Ramping speed [µs per 0.007 Volt]</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QSpinBox" name="resApsorpImgRampSpeed">
+             <property name="value">
+              <number>1</number>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QPushButton" name="destroyMOT">
+        <property name="geometry">
+         <rect>
+          <x>300</x>
+          <y>140</y>
+          <width>131</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>align Imaging Beam</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_4">
+       <attribute name="title">
+        <string>delayTimes</string>
+       </attribute>
+       <widget class="QSpinBox" name="ovenShutterDelay">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>10</y>
+          <width>101</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>1000000</number>
+        </property>
+        <property name="value">
+         <number>700000</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_73">
+        <property name="geometry">
+         <rect>
+          <x>120</x>
+          <y>10</y>
+          <width>161</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Oven Shutter - Open/Close [µs]</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="readOutDelay">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>150</y>
+          <width>91</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>1000000</number>
+        </property>
+        <property name="value">
+         <number>90000</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_76">
+        <property name="geometry">
+         <rect>
+          <x>110</x>
+          <y>150</y>
+          <width>101</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>readOut Delay [µs]</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="relrec">
+       <attribute name="title">
+        <string>Release-Recapture</string>
+       </attribute>
+       <widget class="QWidget" name="gridLayoutWidget">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>0</y>
+          <width>131</width>
+          <height>181</height>
+         </rect>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout">
+         <item>
+          <widget class="QLabel" name="label_9">
+           <property name="text">
+            <string>Repetitions for each TOF</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="repetitions">
+           <property name="maximum">
+            <number>100000000</number>
+           </property>
+           <property name="value">
+            <number>1</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_10">
+           <property name="text">
+            <string>MOT Loading time [µs]</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="loadingTime">
+           <property name="maximum">
+            <number>1000000000</number>
+           </property>
+           <property name="value">
+            <number>30000000</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_11">
+           <property name="text">
+            <string>Time of flight - inital [µs]</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="flightTimeInitial">
+           <property name="maximum">
+            <number>1000000000</number>
+           </property>
+           <property name="value">
+            <number>3000</number>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="label_12">
+           <property name="text">
+            <string>Time of flight - final[µs]</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QSpinBox" name="flightTimeFinal">
+           <property name="maximum">
+            <number>1000000000</number>
+           </property>
+           <property name="value">
+            <number>3000</number>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QWidget" name="gridLayoutWidget_2">
+        <property name="geometry">
+         <rect>
+          <x>140</x>
+          <y>20</y>
+          <width>160</width>
+          <height>144</height>
+         </rect>
+        </property>
+        <layout class="QGridLayout" name="gridLayout">
+         <item row="2" column="0">
+          <widget class="QLabel" name="label_14">
+           <property name="text">
+            <string>Time of exposure [µs]</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="label_13">
+           <property name="text">
+            <string>Time of flight steps [µs]</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QSpinBox" name="rel_recap_exp_time">
+           <property name="maximum">
+            <number>1000000000</number>
+           </property>
+           <property name="value">
+            <number>500</number>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QSpinBox" name="flightTimeSteps">
+           <property name="maximum">
+            <number>1000000000</number>
+           </property>
+           <property name="value">
+            <number>500</number>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QPushButton" name="startSequence1">
+           <property name="text">
+            <string>start Sequence</string>
+           </property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QPushButton" name="stopSequence1">
+           <property name="text">
+            <string>stopSequence</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QLabel" name="label_24">
+        <property name="geometry">
+         <rect>
+          <x>310</x>
+          <y>20</y>
+          <width>211</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>All ADwin times  in units of PROCESSDELAY</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="ROIbackground">
+        <property name="geometry">
+         <rect>
+          <x>330</x>
+          <y>60</y>
+          <width>121</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>takeROIBackground</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_27">
+        <property name="geometry">
+         <rect>
+          <x>510</x>
+          <y>30</y>
+          <width>81</width>
+          <height>31</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Target detuning</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="targetDetuning">
+        <property name="geometry">
+         <rect>
+          <x>510</x>
+          <y>70</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>4.200000000000000</double>
+        </property>
+       </widget>
+       <widget class="SpinBox" name="rampingSpeed">
+        <property name="geometry">
+         <rect>
+          <x>510</x>
+          <y>120</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>1000000</number>
+        </property>
+        <property name="value">
+         <number>20</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_28">
+        <property name="geometry">
+         <rect>
+          <x>510</x>
+          <y>100</y>
+          <width>171</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Ramping speed [µs per 0.007 Volt]</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="vcaCoolerTarget">
+        <property name="geometry">
+         <rect>
+          <x>680</x>
+          <y>60</y>
+          <width>61</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.850000000000000</double>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="vcaRepumperTarget">
+        <property name="geometry">
+         <rect>
+          <x>770</x>
+          <y>60</y>
+          <width>62</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.950000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_29">
+        <property name="geometry">
+         <rect>
+          <x>640</x>
+          <y>40</y>
+          <width>101</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>VCA Cooler Target</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_30">
+        <property name="geometry">
+         <rect>
+          <x>770</x>
+          <y>40</y>
+          <width>111</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>VCA Repumper Target</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="switchOpticalTrap">
+        <property name="geometry">
+         <rect>
+          <x>720</x>
+          <y>130</y>
+          <width>131</width>
+          <height>21</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Optical Trap full power</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="active_slowerbeam">
+        <property name="geometry">
+         <rect>
+          <x>330</x>
+          <y>100</y>
+          <width>111</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Slower beam on</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_71">
+        <property name="geometry">
+         <rect>
+          <x>710</x>
+          <y>90</y>
+          <width>131</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Molasse cooling time [µs]</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="molasseCoolTime">
+        <property name="geometry">
+         <rect>
+          <x>710</x>
+          <y>110</y>
+          <width>111</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>100000</number>
+        </property>
+        <property name="value">
+         <number>0</number>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="maxMOTCurrent">
+        <property name="geometry">
+         <rect>
+          <x>340</x>
+          <y>150</y>
+          <width>111</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <double>120.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>120.000000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_72">
+        <property name="geometry">
+         <rect>
+          <x>340</x>
+          <y>130</y>
+          <width>91</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Max MOT current</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="fixedFlightTimeCheck">
+        <property name="geometry">
+         <rect>
+          <x>720</x>
+          <y>160</y>
+          <width>111</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>fixed flight Time</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="motBeamsOn">
+        <property name="geometry">
+         <rect>
+          <x>510</x>
+          <y>150</y>
+          <width>171</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>MOT beams on during flight time</string>
+        </property>
+        <property name="tristate">
+         <bool>false</bool>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="reloadKniel">
+        <property name="geometry">
+         <rect>
+          <x>540</x>
+          <y>10</y>
+          <width>131</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>reload Kniel Sequence</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_3">
+       <attribute name="title">
+        <string>Dipole transfer</string>
+       </attribute>
+       <widget class="QSpinBox" name="repetitions_2">
+        <property name="geometry">
+         <rect>
+          <x>20</x>
+          <y>30</y>
+          <width>91</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="value">
+         <number>1</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_60">
+        <property name="geometry">
+         <rect>
+          <x>20</x>
+          <y>10</y>
+          <width>81</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Repetitions</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="loadingTime3">
+        <property name="geometry">
+         <rect>
+          <x>20</x>
+          <y>80</y>
+          <width>129</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>1000000000</number>
+        </property>
+        <property name="value">
+         <number>2000000</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_61">
+        <property name="geometry">
+         <rect>
+          <x>20</x>
+          <y>60</y>
+          <width>129</width>
+          <height>15</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>MOT Loading time</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_62">
+        <property name="geometry">
+         <rect>
+          <x>300</x>
+          <y>10</y>
+          <width>211</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>All ADwin times  in units of PROCESSDELAY</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="RFdriverswitch">
+        <property name="geometry">
+         <rect>
+          <x>200</x>
+          <y>30</y>
+          <width>91</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>RF driver off</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="exposure_time">
+        <property name="geometry">
+         <rect>
+          <x>20</x>
+          <y>130</y>
+          <width>158</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>1000000000</number>
+        </property>
+        <property name="value">
+         <number>500</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_59">
+        <property name="geometry">
+         <rect>
+          <x>20</x>
+          <y>110</y>
+          <width>158</width>
+          <height>13</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Time of exposure [µs]</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="targetDetuning_2">
+        <property name="geometry">
+         <rect>
+          <x>380</x>
+          <y>50</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>2.350000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_63">
+        <property name="geometry">
+         <rect>
+          <x>380</x>
+          <y>20</y>
+          <width>81</width>
+          <height>31</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Target detuning</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_64">
+        <property name="geometry">
+         <rect>
+          <x>380</x>
+          <y>80</y>
+          <width>171</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Ramp rate [µs per 0.007 Volt]</string>
+        </property>
+       </widget>
+       <widget class="SpinBox" name="rampingSpeed_2">
+        <property name="geometry">
+         <rect>
+          <x>380</x>
+          <y>100</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>1000000</number>
+        </property>
+        <property name="value">
+         <number>120</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_65">
+        <property name="geometry">
+         <rect>
+          <x>600</x>
+          <y>0</y>
+          <width>101</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>VCA Cooler Target</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="vcaCoolerTarget_2">
+        <property name="geometry">
+         <rect>
+          <x>600</x>
+          <y>20</y>
+          <width>61</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.800000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_66">
+        <property name="geometry">
+         <rect>
+          <x>720</x>
+          <y>20</y>
+          <width>111</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>VCA Repumper Target</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="vcaRepumperTarget_2">
+        <property name="geometry">
+         <rect>
+          <x>720</x>
+          <y>40</y>
+          <width>62</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.850000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_67">
+        <property name="geometry">
+         <rect>
+          <x>600</x>
+          <y>50</y>
+          <width>91</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Dipole laser power</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_69">
+        <property name="geometry">
+         <rect>
+          <x>750</x>
+          <y>120</y>
+          <width>111</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Optical trap time [µs]</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="opticaltraptime">
+        <property name="geometry">
+         <rect>
+          <x>750</x>
+          <y>140</y>
+          <width>101</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="minimum">
+         <number>1600</number>
+        </property>
+        <property name="maximum">
+         <number>90000</number>
+        </property>
+        <property name="value">
+         <number>1600</number>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="active_slowerbeam_2">
+        <property name="geometry">
+         <rect>
+          <x>200</x>
+          <y>80</y>
+          <width>111</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Slower beam on</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="startSequence2">
+        <property name="geometry">
+         <rect>
+          <x>380</x>
+          <y>130</y>
+          <width>158</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>start Sequence</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="stopSequence2">
+        <property name="geometry">
+         <rect>
+          <x>210</x>
+          <y>130</y>
+          <width>158</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>stopSequence</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="plotCounts">
+        <property name="geometry">
+         <rect>
+          <x>210</x>
+          <y>160</y>
+          <width>181</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>plot Atomnumber after Compression</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="stopPlotCounts">
+        <property name="geometry">
+         <rect>
+          <x>410</x>
+          <y>160</y>
+          <width>75</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>stop Plotting</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="fieldSize">
+        <property name="geometry">
+         <rect>
+          <x>500</x>
+          <y>160</y>
+          <width>61</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>10000</number>
+        </property>
+        <property name="value">
+         <number>2000</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_70">
+        <property name="geometry">
+         <rect>
+          <x>570</x>
+          <y>160</y>
+          <width>51</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Field size</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="dipoleTransferROIBackgnd">
+        <property name="geometry">
+         <rect>
+          <x>200</x>
+          <y>50</y>
+          <width>131</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>take ROI Background</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="molasseCoolTime_2">
+        <property name="geometry">
+         <rect>
+          <x>740</x>
+          <y>90</y>
+          <width>111</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <number>100000</number>
+        </property>
+        <property name="value">
+         <number>1000</number>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_74">
+        <property name="geometry">
+         <rect>
+          <x>730</x>
+          <y>70</y>
+          <width>131</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Molasse cooling time [µs]</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="maxMOTCurrent_2">
+        <property name="geometry">
+         <rect>
+          <x>630</x>
+          <y>150</y>
+          <width>111</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <double>5.000000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>5.000000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_75">
+        <property name="geometry">
+         <rect>
+          <x>630</x>
+          <y>130</y>
+          <width>91</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Max MOT current</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="atom_number">
+       <attribute name="title">
+        <string>Atom number</string>
+       </attribute>
+       <widget class="QWidget" name="gridLayoutWidget_3">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>10</y>
+          <width>160</width>
+          <height>103</height>
+         </rect>
+        </property>
+        <layout class="QGridLayout" name="gridLayout_2">
+         <item row="1" column="1">
+          <widget class="QLabel" name="label_17">
+           <property name="text">
+            <string>end Volt</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QLabel" name="label_16">
+           <property name="text">
+            <string>start Volt</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="0">
+          <widget class="QDoubleSpinBox" name="startVolt">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QDoubleSpinBox" name="endVolt">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QLabel" name="label_18">
+           <property name="text">
+            <string>step Volt</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QDoubleSpinBox" name="stepVolt">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QPushButton" name="startScan">
+           <property name="text">
+            <string>startScan</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QLabel" name="label_20">
+        <property name="geometry">
+         <rect>
+          <x>340</x>
+          <y>50</y>
+          <width>131</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>exposure time in mus</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="aSyncmodeExptime">
+        <property name="geometry">
+         <rect>
+          <x>241</x>
+          <y>50</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="takeBackgroundAsync">
+        <property name="geometry">
+         <rect>
+          <x>240</x>
+          <y>10</y>
+          <width>141</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Take Background (async)</string>
+        </property>
+       </widget>
+       <widget class="QSpinBox" name="spinBox_5">
+        <property name="geometry">
+         <rect>
+          <x>240</x>
+          <y>80</y>
+          <width>81</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_21">
+        <property name="geometry">
+         <rect>
+          <x>340</x>
+          <y>80</y>
+          <width>91</width>
+          <height>21</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Period in ms</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="fitExponential">
+        <property name="geometry">
+         <rect>
+          <x>490</x>
+          <y>20</y>
+          <width>101</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Fit Exponential</string>
+        </property>
+       </widget>
+       <widget class="QLCDNumber" name="lossRate">
+        <property name="geometry">
+         <rect>
+          <x>490</x>
+          <y>50</y>
+          <width>64</width>
+          <height>23</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_22">
+        <property name="geometry">
+         <rect>
+          <x>560</x>
+          <y>50</y>
+          <width>21</width>
+          <height>21</height>
+         </rect>
+        </property>
+        <property name="font">
+         <font>
+          <pointsize>13</pointsize>
+          <weight>75</weight>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="text">
+         <string>R</string>
+        </property>
+       </widget>
+       <widget class="QLCDNumber" name="loadingRate">
+        <property name="geometry">
+         <rect>
+          <x>490</x>
+          <y>80</y>
+          <width>64</width>
+          <height>23</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_23">
+        <property name="geometry">
+         <rect>
+          <x>560</x>
+          <y>80</y>
+          <width>21</width>
+          <height>21</height>
+         </rect>
+        </property>
+        <property name="font">
+         <font>
+          <pointsize>13</pointsize>
+          <weight>75</weight>
+          <bold>true</bold>
+         </font>
+        </property>
+        <property name="text">
+         <string>L</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="fitLinear">
+        <property name="geometry">
+         <rect>
+          <x>610</x>
+          <y>20</y>
+          <width>75</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Fit Linear</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="pid">
+       <attribute name="title">
+        <string>PID controller</string>
+       </attribute>
+       <widget class="QCheckBox" name="startPID">
+        <property name="geometry">
+         <rect>
+          <x>240</x>
+          <y>20</y>
+          <width>101</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Start regulation</string>
+        </property>
+       </widget>
+       <widget class="QWidget" name="verticalLayoutWidget">
+        <property name="geometry">
+         <rect>
+          <x>10</x>
+          <y>20</y>
+          <width>160</width>
+          <height>108</height>
+         </rect>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_5">
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_7">
+           <item>
+            <widget class="QDoubleSpinBox" name="pgain">
+             <property name="maximum">
+              <double>1000.000000000000000</double>
+             </property>
+             <property name="singleStep">
+              <double>0.010000000000000</double>
+             </property>
+             <property name="value">
+              <double>11.340000000000000</double>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_33">
+             <property name="text">
+              <string>P</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_8">
+           <item>
+            <widget class="QDoubleSpinBox" name="igain">
+             <property name="maximum">
+              <double>10000.000000000000000</double>
+             </property>
+             <property name="singleStep">
+              <double>0.010000000000000</double>
+             </property>
+             <property name="value">
+              <double>0.320000000000000</double>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_34">
+             <property name="text">
+              <string>I</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_9">
+           <item>
+            <widget class="QDoubleSpinBox" name="dgain">
+             <property name="maximum">
+              <double>1000.000000000000000</double>
+             </property>
+             <property name="singleStep">
+              <double>0.010000000000000</double>
+             </property>
+             <property name="value">
+              <double>50.000000000000000</double>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_35">
+             <property name="text">
+              <string>D</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <layout class="QHBoxLayout" name="horizontalLayout_11">
+           <item>
+            <widget class="QDoubleSpinBox" name="pid_bias">
+             <property name="minimum">
+              <double>-20.000000000000000</double>
+             </property>
+             <property name="maximum">
+              <double>20.000000000000000</double>
+             </property>
+             <property name="singleStep">
+              <double>0.010000000000000</double>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="label_53">
+             <property name="text">
+              <string>bias</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+        </layout>
+       </widget>
+       <widget class="QDoubleSpinBox" name="setPoint">
+        <property name="geometry">
+         <rect>
+          <x>240</x>
+          <y>60</y>
+          <width>62</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="decimals">
+         <number>3</number>
+        </property>
+        <property name="singleStep">
+         <double>0.050000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_36">
+        <property name="geometry">
+         <rect>
+          <x>310</x>
+          <y>60</y>
+          <width>46</width>
+          <height>20</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Setpoint</string>
+        </property>
+       </widget>
+       <widget class="QPushButton" name="resetSum">
+        <property name="geometry">
+         <rect>
+          <x>400</x>
+          <y>20</y>
+          <width>75</width>
+          <height>23</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>resetSum</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="laserLocks">
+       <attribute name="title">
+        <string>Laser Locks</string>
+       </attribute>
+       <widget class="QFrame" name="refLaserBox">
+        <property name="geometry">
+         <rect>
+          <x>70</x>
+          <y>40</y>
+          <width>120</width>
+          <height>80</height>
+         </rect>
+        </property>
+        <property name="autoFillBackground">
+         <bool>true</bool>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::StyledPanel</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Raised</enum>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_39">
+        <property name="geometry">
+         <rect>
+          <x>80</x>
+          <y>0</y>
+          <width>101</width>
+          <height>31</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Reference Laser</string>
+        </property>
+       </widget>
+       <widget class="QFrame" name="MOTLaserBox">
+        <property name="geometry">
+         <rect>
+          <x>260</x>
+          <y>40</y>
+          <width>120</width>
+          <height>80</height>
+         </rect>
+        </property>
+        <property name="autoFillBackground">
+         <bool>true</bool>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::StyledPanel</enum>
+        </property>
+        <property name="frameShadow">
+         <enum>QFrame::Raised</enum>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_40">
+        <property name="geometry">
+         <rect>
+          <x>270</x>
+          <y>10</y>
+          <width>81</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>MOT Laser</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="refLaserThreshold">
+        <property name="geometry">
+         <rect>
+          <x>460</x>
+          <y>30</y>
+          <width>61</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="decimals">
+         <number>3</number>
+        </property>
+        <property name="value">
+         <double>1.200000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_41">
+        <property name="geometry">
+         <rect>
+          <x>530</x>
+          <y>30</y>
+          <width>181</width>
+          <height>31</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>max RMS error reference laser [mV]</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="MOTLaserThreshold">
+        <property name="geometry">
+         <rect>
+          <x>460</x>
+          <y>80</y>
+          <width>62</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="decimals">
+         <number>3</number>
+        </property>
+        <property name="value">
+         <double>8.000000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_42">
+        <property name="geometry">
+         <rect>
+          <x>530</x>
+          <y>80</y>
+          <width>151</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>min RMS error MOT laser [mV]</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="laserLock">
+        <property name="geometry">
+         <rect>
+          <x>460</x>
+          <y>0</y>
+          <width>111</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>check Laser Lock</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab">
+       <attribute name="title">
+        <string>Power Monitoring</string>
+       </attribute>
+       <widget class="GraphicsLayoutWidget" name="analogInPlots">
+        <property name="geometry">
+         <rect>
+          <x>380</x>
+          <y>0</y>
+          <width>531</width>
+          <height>131</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="motXMonitor">
+        <property name="geometry">
+         <rect>
+          <x>310</x>
+          <y>10</y>
+          <width>70</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>MOT X</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="motYMonitor">
+        <property name="geometry">
+         <rect>
+          <x>310</x>
+          <y>40</y>
+          <width>70</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>MOT Y</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="motZMonitor">
+        <property name="geometry">
+         <rect>
+          <x>310</x>
+          <y>70</y>
+          <width>70</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>MOT Z</string>
+        </property>
+       </widget>
+       <widget class="QLCDNumber" name="totalSaturation">
+        <property name="geometry">
+         <rect>
+          <x>70</x>
+          <y>30</y>
+          <width>91</width>
+          <height>51</height>
+         </rect>
+        </property>
+        <property name="smallDecimalPoint">
+         <bool>true</bool>
+        </property>
+        <property name="numDigits">
+         <number>4</number>
+        </property>
+        <property name="segmentStyle">
+         <enum>QLCDNumber::Flat</enum>
+        </property>
+        <property name="value" stdset="0">
+         <double>0.000000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_54">
+        <property name="geometry">
+         <rect>
+          <x>70</x>
+          <y>10</y>
+          <width>151</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Saturation of MOT beams:</string>
+        </property>
+       </widget>
+      </widget>
+      <widget class="QWidget" name="tab_2">
+       <attribute name="title">
+        <string>Wiggle Functions</string>
+       </attribute>
+       <widget class="QComboBox" name="analogOuts">
+        <property name="geometry">
+         <rect>
+          <x>400</x>
+          <y>30</y>
+          <width>111</width>
+          <height>22</height>
+         </rect>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="minWiggle">
+        <property name="geometry">
+         <rect>
+          <x>400</x>
+          <y>80</y>
+          <width>62</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <double>5.000000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_25">
+        <property name="geometry">
+         <rect>
+          <x>400</x>
+          <y>60</y>
+          <width>46</width>
+          <height>13</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Min</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="maxWiggle">
+        <property name="geometry">
+         <rect>
+          <x>400</x>
+          <y>130</y>
+          <width>62</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="maximum">
+         <double>5.000000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_26">
+        <property name="geometry">
+         <rect>
+          <x>400</x>
+          <y>110</y>
+          <width>46</width>
+          <height>13</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Max</string>
+        </property>
+       </widget>
+       <widget class="QCheckBox" name="doWiggleCheckbox">
+        <property name="geometry">
+         <rect>
+          <x>520</x>
+          <y>50</y>
+          <width>70</width>
+          <height>17</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>do Wiggle</string>
+        </property>
+       </widget>
+       <widget class="QDoubleSpinBox" name="wiggle_periods">
+        <property name="geometry">
+         <rect>
+          <x>291</x>
+          <y>70</y>
+          <width>51</width>
+          <height>22</height>
+         </rect>
+        </property>
+        <property name="minimum">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="value">
+         <double>0.100000000000000</double>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_58">
+        <property name="geometry">
+         <rect>
+          <x>270</x>
+          <y>40</y>
+          <width>101</width>
+          <height>16</height>
+         </rect>
+        </property>
+        <property name="text">
+         <string>Frequency in Hz</string>
+        </property>
+       </widget>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+   <zorder>delayTimes</zorder>
+   <zorder>label_7</zorder>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>GraphicsLayoutWidget</class>
+   <extends>QGraphicsView</extends>
+   <header>pyqtgraph</header>
+  </customwidget>
+  <customwidget>
+   <class>SpinBox</class>
+   <extends>QSpinBox</extends>
+   <header>pyqtgraph</header>
+  </customwidget>
+  <customwidget>
+   <class>AnalogOut</class>
+   <extends>QSpinBox</extends>
+   <header location="global">AnalogOut</header>
+  </customwidget>
+  <customwidget>
+   <class>DigitalInOut</class>
+   <extends>QCheckBox</extends>
+   <header>DigitalInOut</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
