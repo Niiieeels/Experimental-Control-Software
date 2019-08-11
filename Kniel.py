@@ -2,7 +2,7 @@ from PyQt4 import QtCore
 import serial
 
 class PowerSupply(QtCore.QObject):
-    def __init__(self, port="COM7", baud=57600):    
+    def __init__(self, port="COM8", baud=57600):    
         super(self.__class__,self).__init__()
         self.ser = serial.Serial(port, baud, timeout=1)
         self.opModes = {0:'Config', 1:'Standard',2:'Lab',3:'Sequence'}
@@ -11,8 +11,9 @@ class PowerSupply(QtCore.QObject):
         if self.ser.isOpen():
             print(self.ser.name + ' is open...')
         self.opMode, self.ctrlMode = self.getMode()
-        self.currentStep = -1
-        self.currentBank = -1
+        self.currentStep = self.getStepsNumber()
+        self.currentBank = self.getActiveBank()
+        self.seq = {}  
 
     modChange = QtCore.pyqtSignal()   
         
@@ -35,10 +36,7 @@ class PowerSupply(QtCore.QObject):
         response = self.ser.readline()
         opModeID = int(response[0])
         ctrlModeID = int(response[2])
-##        try:
-##            print "Operation mode: " + self.opModes[opModeID] + "\nControl mode: " + self.ctrlModes[ctrlModeID] + "\n"
-##        except KeyError:
-##            "Something went wrong! Unvalid control or operation mode."
+
         return (opModeID, ctrlModeID)
     
     def setModes(self,operation_id, control_id):
@@ -88,30 +86,10 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return -1
         else:
-            return int(response[0])
+            return int(response[0])        
 
-    def getActiveBank(self):
-        cmd='SB?\n'
-        self.ser.write(cmd.encode('ascii'))
-        response=self.ser.readline()
-        if response[:-1] in self.errors:
-            print self.errors[response[:-1]]
-            return -1
-        else:
-            self.currentBank = int(response[:-1])
-            return self.currentBank
-        
-    def setActiveBank(self, bank):
-        cmd='SB '+ str(bank) + '\n'
-        self.ser.write(cmd.encode('ascii'))
-        response=self.ser.readline()
-        if response[:-1] in self.errors:
-            print self.errors[response[:-1]]
-            return 0
-        else:
-            self.currentBank = bank
-            return 1
-        
+
+########### commands for modifying sequences ###########
 
     def getActiveSequence(self):
         cmd='Q:SEQ:SET?\n'
@@ -141,6 +119,16 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return 0
 
+    def setSequenceStepnumber(self, seqID=0):
+        self.setSequence()
+        cmd='Q:SEQ:NUMBER?\n'
+        self.ser.write(cmd.encode('ascii'))
+        response = self.ser.readline()
+        if response[:-1] in self.errors:
+            print self.errors[response[:-1]]
+            return -1
+        return int(response[:-1])
+
     def getStepsNumber(self, seqID=0):
         self.setSequence()
         cmd='Q:STEP:NUMBER?\n'
@@ -160,8 +148,8 @@ class PowerSupply(QtCore.QObject):
             return 0
         self.currentStep = i
 
-    def getStepBank(self,i):
-        self.setStepNumber(i)
+# returns bank of currently adjusted bank
+    def getStepBank(self):
         cmd='Q:STEP:BANK?\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
@@ -169,9 +157,8 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return -1
         return int(response[:-1])
-    def setStepBank(self,i):
-        if self.currentStep != i:
-            self.setStepNumber(i)
+
+    def setStepBank(self):
         cmd='Q:STEP:BANK ' + str(i) + '\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
@@ -179,9 +166,7 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return 0
     
-    def getStepTime(self,i):
-        if self.currentStep != i:
-            self.setStepNumber(i)
+    def getStepTime(self):
         cmd='Q:STEP:TIME:SET?\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
@@ -189,18 +174,14 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return -1
         return float(response[:-1])
-    def setStepTime(self, i, time):
-        if self.currentStep != i:
-            self.setStepNumber(i)
+    def setStepTime(self, time):
         cmd='Q:STEP:TIME:SET '+str(time)+'\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
         if response[:-1] in self.errors:
             print self.errors[response[:-1]]
             return 0
-    def getStepType(self,i):
-        if self.currentStep != i:
-            self.setStepNumber(i)
+    def getStepType(self):
         cmd='Q:STEP:TYPE?\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
@@ -208,9 +189,7 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return -1
         return int(response[:-1])
-    def setStepType(self,i, type):
-        if self.currentStep != i:
-            self.setStepNumber(i)
+    def setStepType(self,type):
         cmd='Q:STEP:TIME:TYPE '+str(type)+'\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
@@ -218,9 +197,7 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return 0
     
-    def getStepMode(self,i):
-        if self.currentStep != i:
-            self.setStepNumber(i)
+    def getStepMode(self):
         cmd='Q:STEP:MODE?\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
@@ -228,59 +205,41 @@ class PowerSupply(QtCore.QObject):
             print self.errors[response[:-1]]
             return -1
         return int(response[:-1])
-    def setStepMode(self,i, mode):
-        if self.currentStep != i:
-            self.setStepNumber(i)
+    def setStepMode(self,mode):
         cmd='Q:STEP:TIME:MODE '+str(mode)+'\n'
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
         if response[:-1] in self.errors:
             print self.errors[response[:-1]]
             return 0
-    def setStepVoltage(self,i,volt):
-        if self.currentStep != i:
-            self.setStepNumber(i)
-        self.setActiveBank(self.getStepBank(self.currentStep))
-        self.setVoltage(volt)
-    def setStepCurrent(self,i, curr):
-        if self.currentStep != i:
-            self.setStepNumber(i)
-        self.setActiveBank(self.getStepBank(self.currentStep))
-        self.setCurrent(curr)
-    def setStepPower(self,i, pwr):
-        if self.currentStep != i:
-            self.setStepNumber(i)
-        self.setActiveBank(self.getStepBank(self.currentStep))
-        self.setPower(pwr)
-
-    def getStepParams(self, step, seqID=0):
+        
+    def getStepParams(self, seqID=0):
+        self.setSequence()
+        params = [self.getStepBank(), self.getStepType(),\
+                  self.getStepMode(), self.getStepTime()]
+        return params
+    
+    def getStepParamsDict(self, step, seqID=0):
         if self.currentStep != step:
             self.setStepNumber(step)
         self.setSequence()
         self.setActiveBank(self.getStepBank(step))
-        params = [self.getStepTime(step)*1000, self.getSetVoltage(), self.getSetCurrent(),\
-                  self.getSetPower(), self.currentBank, self.getStepType(step),\
-                  self.getStepMode(step)]
-        return params
-    
-        
-    '''
-    reads in a Kniel sequence from a file and loads it to the power supply
-    '''
-    def loadSequence(self, filename, loops=1, mode=2, seqID=0, stretch=1):
-        pass
+        paramsDict = {'TIME':self.getStepTime(step), 'SV':self.getSetVoltage(), 'SC':self.getSetCurrent(),\
+                  'SP':self.getSetPower(), 'BANK':self.currentBank, 'TYPE':self.getStepType(step),\
+                  'MODE':self.getStepMode(step)}
+        return paramsDict
 
     '''
-    configurates a sequence with the main parameter seq, comprising
+    configures a sequence with the main parameter seq, comprising
     a dictionary of dictionaries. The outer dictionary contains as keys the
     step numbers and its value is a dictionary with the according parameters
     SV, SC, SP, Bank, Type (default=0), Mode (default=2).
     The number of keys in the outer dictionary is the number of steps in
     the sequence.
     '''
-    def writeSequence(self, seq, loops=1, mode=2, seqID=0, stretch=1):
+    def writeSequence(self, seq, loops=0, mode=2, seqID=0, stretch=1):
         self.setSequence(seqID)
-        cmd='Q:SEQ:USAGE 0\n'
+        cmd='Q:SEQ:USAGE 0\n' # standard sequence
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
         if response[:-1] in self.errors:
@@ -292,7 +251,7 @@ class PowerSupply(QtCore.QObject):
         if response[:-1] in self.errors:
             print self.errors[response[:-1]]
             return 0
-        cmd='Q:SEQ:LOOP:SET '+str(loops)+'\n'
+        cmd='Q:SEQ:LOOP:SET '+str(loops)+'\n' # endless repetitions
         self.ser.write(cmd.encode('ascii'))
         response = self.ser.readline()
         if response[:-1] in self.errors:
@@ -319,41 +278,6 @@ class PowerSupply(QtCore.QObject):
             if response[:-1] in self.errors:
                 print self.errors[response[:-1]]
                 return 0
-            # setting the values of the bank
-            # changing the active bank to the bank of the step
-            cmd='SB '+str(seq[i]['BANK'])+'\n'
-            self.ser.write(cmd.encode('ascii'))
-            response = self.ser.readline()
-            if response[:-1] in self.errors:
-                print self.errors[response[:-1]]
-                return 0
-            cmd='SV '+str(seq[i]['SV'])+'\n'
-            self.ser.write(cmd.encode('ascii'))
-            response = self.ser.readline()
-            if response[:-1] in self.errors:
-                print self.errors[response[:-1]]
-                return 0
-            cmd='SC '+str(seq[i]['SC'])+'\n'
-            self.ser.write(cmd.encode('ascii'))
-            response = self.ser.readline()
-            if response[:-1] in self.errors:
-                print self.errors[response[:-1]]
-                return 0
-            cmd='SP '+str(seq[i]['SP'])+'\n'
-            self.ser.write(cmd.encode('ascii'))
-            response = self.ser.readline()
-            if response[:-1] in self.errors:
-                print self.errors[response[:-1]]
-                return 0
-    
-            # setting the duration of the step
-            cmd='Q:STEP:TIME:SET '+str(seq[i]['TIME'])+'\n'
-            self.ser.write(cmd.encode('ascii'))
-            response = self.ser.readline()
-            if response[:-1] in self.errors:
-                print self.errors[response[:-1]]
-                return 0
-
             cmd='Q:STEP:TYPE '+str(seq[i]['TYPE'])+'\n'
             self.ser.write(cmd.encode('ascii'))
             response = self.ser.readline()
@@ -366,8 +290,57 @@ class PowerSupply(QtCore.QObject):
             if response[:-1] in self.errors:
                 print self.errors[response[:-1]]
                 return 0
+            # in case the step is NOT triggered externally
+            if (seq[i]['TYPE']!=3):
+                # setting the duration of the step
+                cmd='Q:STEP:TIME:SET '+str(seq[i]['TIME'])+'\n'
+                self.ser.write(cmd.encode('ascii'))
+                response = self.ser.readline()
+                if response[:-1] in self.errors:
+                    print self.errors[response[:-1]]
+                    return 0
+        '''
+        reads in a Kniel sequence from a file and loads it to the power supply
+        '''
+    def loadSequence(self, filename, loops=1, mode=2, seqID=0, stretch=1):
+        pass
         
-############ functions for the current ######################
+############ functions for modifying bank content ######################
+
+    def getActiveBank(self):
+        cmd='SB?\n'
+        self.ser.write(cmd.encode('ascii'))
+        response=self.ser.readline()
+        if response[:-1] in self.errors:
+            print self.errors[response[:-1]]
+            return -1
+        else:
+            self.currentBank = int(response[:-1])
+            return self.currentBank
+        
+    def setActiveBank(self, bank):
+        cmd='SB '+ str(bank) + '\n'
+        self.ser.write(cmd.encode('ascii'))
+        response=self.ser.readline()
+        if response[:-1] in self.errors:
+            print self.errors[response[:-1]]
+            return 0
+        else:
+            self.currentBank = bank
+            return 1
+
+    def getBankParams(self):
+        return [self.getSetVoltage(), self.getSetCurrent(), self.getSetPower()]
+        
+    # bankParams is a dictionary of an inner dictionary with the keywords "SV", "SC" and "SP"
+    # and setBankParams will set those parameters of the currently ACTIVE bank
+    def setBankParams(self,bankParams):
+        for bankNo, bank in enumerate(bankParams):
+            self.setCurrent(bankParams["SC"])
+            self.setVoltage(bankParams["SV"])
+            self.setPower(bankParams["SP"])  
+        
+                
     '''
     returns set current in Ampere
     '''
@@ -415,8 +388,6 @@ class PowerSupply(QtCore.QObject):
         else:
             return 1
 
-############ functions for the voltage ######################
-
     def getSetVoltage(self):
         cmd = 'SV?\n'
         self.ser.write(cmd.encode('ascii'))
@@ -449,8 +420,6 @@ class PowerSupply(QtCore.QObject):
         else:
             return 1
         
-
-############ functions for the power ######################
 
     def getSetPower(self):
         cmd = 'SP?\n'

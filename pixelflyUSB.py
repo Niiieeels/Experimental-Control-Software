@@ -243,22 +243,22 @@ class PixelFly(QtCore.QObject):
         # pass values to ctypes variables
         dwDelay = ctypes.c_uint32(0)
         dwExposure = ctypes.c_uint32(int(exp_time))
-        wTimeBaseDelay = ctypes.c_uint16(0)
+        wTimeBaseDelay = ctypes.c_uint16(1)
         wTimeBaseExposure = ctypes.c_uint16(int(base_exposure))
-        print(wTimeBaseExposure.value)
-        if verbose:
-            print('Setting exposure time/delay..')
         # set exposure time and delay time
-        self.PixFlyDLL.PCO_SetDelayExposureTime(self.hCam,
+        msg = ctypes.c_uint32(self.PixFlyDLL.PCO_SetDelayExposureTime(self.hCam,
                                                 dwDelay, dwExposure,
-                                                wTimeBaseDelay, wTimeBaseExposure)
+                                                wTimeBaseDelay, wTimeBaseExposure))
         self.PixFlyDLL.PCO_GetDelayExposureTime(self.hCam, ctypes.byref(dwDelay),
                                                 ctypes.byref(dwExposure),
                                                 ctypes.byref(wTimeBaseDelay),
                                                 ctypes.byref(wTimeBaseExposure))
-        print(dwExposure.value)
-        print(wTimeBaseExposure.value)
-        #expTime_params={'Exposure Time':dwExposure.value,'Time unit':wTimeBaseExposure.value}
+        if verbose:
+            print('Setting exposure time/delay..')
+            print('New exposure time: ', dwExposure.value)
+            print('New time base: ', wTimeBaseExposure.value)
+            print('Error message: ', msg.value)
+        
         self.set_params['Exposure time'] = [dwExposure.value, self.time_modes[wTimeBaseExposure.value]]
 
         return None
@@ -528,9 +528,10 @@ class PixelFly(QtCore.QObject):
         
     def stopCamera(self):
         if self.recording:
+            self.setRecordingState(0)
             self.recording = False
             self.removeAllBufferFromQueue()
-            self.setRecordingState(0)
+            
     
     def disarm_camera(self):
         """
@@ -556,7 +557,7 @@ class PixelFly(QtCore.QObject):
             if add:
                 self.pic += self.q.get()
             else:
-                self.pic = self.q.get()
+                self.pic = np.array(self.q.get())
 
     #this function is important for live view, because it continously emits the signal newdata
     # which updates the campictures and roisum plot in the main gui thread
@@ -972,12 +973,12 @@ class PixelFly(QtCore.QObject):
         self.PixFlyDLL.PCO_GetCameraHealthStatus(self.hCam,ctypes.byref(self.dwWarn),ctypes.byref(self.dwErr),ctypes.byref(self.dwStatus))
         return
 
-    def get_image_on_trigger(self):
+    def get_image_on_trigger(self,no_of_buffers):
         wSegment=ctypes.c_uint16(1)
         dw1stImage=ctypes.c_uint32(0)
         dwLastImage=ctypes.c_uint32(0)
         self.wBitsPerPixel = ctypes.c_uint16(16)
-        for which_buf in range(len(self.buffer_numbers)):
+        for which_buf in range(no_of_buffers):
             self.PixFlyDLL.PCO_GetImageEx(self.hCam,wSegment,dw1stImage,dwLastImage,self.buffer_numbers[which_buf],self.wXResAct,self.wYResAct,self.wBitsPerPixel)
             if self.q.full():
                 print('Frames queue is full.')

@@ -2,6 +2,14 @@ from pyqtgraph import SpinBox
 from ADwin import ADwin, ADwinError
 import time
 
+
+#ADwin Pro II
+## Module 1
+# AO 1 Imaging VCO
+# AO 2 Cooler VCO
+# AO 3 Zeeman VCO
+# AO 4 Repumper VCO
+
 class AnalogOut(SpinBox):
     def __init__(self, parent):
         super(AnalogOut, self).__init__(parent, siPrefix = 'V')

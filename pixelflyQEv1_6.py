@@ -178,6 +178,8 @@ class pixelfly(QtCore.QObject):
             err = InitBoard(board, byref(self.hdriver))
             if(err == PCO_NOERROR):
                     print "Initializing successful"
+            else:
+                    print "Initialization unsuccessful."
             self.path = os.path.dirname(os.path.realpath("__file__"))
             self.isrunning = 0
             self.prepared = False

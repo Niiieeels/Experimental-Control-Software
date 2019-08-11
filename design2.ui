@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>281</width>
-    <height>126</height>
+    <height>223</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -20,7 +20,7 @@
       <x>0</x>
       <y>0</y>
       <width>272</width>
-      <height>87</height>
+      <height>176</height>
      </rect>
     </property>
     <layout class="QVBoxLayout" name="verticalLayout">
@@ -43,9 +43,34 @@
       </layout>
      </item>
      <item>
+      <layout class="QHBoxLayout" name="horizontalLayout_3">
+       <item>
+        <widget class="QPushButton" name="getProcess1DelayPro">
+         <property name="text">
+          <string>Process 1 Delay Pro II</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QSpinBox" name="process1DelayPro">
+         <property name="maximum">
+          <number>10000</number>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
       <widget class="QPushButton" name="adwinBoot">
        <property name="text">
         <string>Boot ADwin</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="adwinPro2Boot">
+       <property name="text">
+        <string>Boot ADwin Pro II</string>
        </property>
       </widget>
      </item>

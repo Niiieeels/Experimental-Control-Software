@@ -5,7 +5,20 @@ import re
 from PyQt4 import QtGui, QtCore, uic
 from PyQt4.uic import loadUi
 from PyQt4.QtGui import * 
-from PyQt4.QtCore import * 
+from PyQt4.QtCore import *
+############## all matplotlib imports ################### 
+import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.backends.qt_compat import QtCore, QtWidgets, is_pyqt5
+if is_pyqt5():
+    from matplotlib.backends.backend_qt5agg import (
+        FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
+else:
+    from matplotlib.backends.backend_qt4agg import (
+        FigureCanvas, NavigationToolbar2QT as NavigationToolbar)
+from matplotlib.figure import Figure
+import matplotlib.colors as colors
+##########################################################
 import sys, time, math, os, errno
 import pyqtgraph as pg
 from pyqtgraph import GraphicsView
@@ -16,8 +29,11 @@ from scipy.optimize import curve_fit
 from scipy import pi,sqrt,exp
 from scipy.special import erf
 import scipy.misc
-import matplotlib.pyplot as plt
+import imageio
+
 from ADwin import ADwin, ADwinError
+import Queue
+import time
 
 from pixelflyQEv1_5 import *
 from pixelflyUSB import *
@@ -29,7 +45,7 @@ import Kniel
 camObject = pixelfly()
 camObject2 = PixelFly() # based on newer SDK for PixelFly USB
 energy3000 = Kniel.PowerSupply()
-energy3000.setModes(2,1)
+#energy3000.setModes(2,1)
 
 
 def easierFit(t, L, R):
@@ -46,17 +62,69 @@ def gaussianWithLinBackground(x,x0,s0,A,B,C):
 
 def skewWithBackground(x,x0,s0,A,B,C,D):
     return A*np.exp(-np.power(x-x0,2)/(2*s0))*(1+erf(D*(x-x0)))+C*x+B
-
                    
 def quadratic(x, s0, vsq):
     return s0+vsq*x*x
+    
+def Umod(Udet):
+    voltage = 18.0058-29.3324*Udet+22.0181*np.power(Udet,2)-9.09801*np.power(Udet,3)+2.25472*np.power(Udet,4)-0.343709*np.power(Udet,5)+0.0315735*np.power(Udet,6)-0.00160351*np.power(Udet, 7)+3.45847E-5*np.power(Udet,8)
+    return voltage
 
+# yfit is a 1D numpy array of zeros of the same length as yfit   
+def fitGaussianProfile(xvals, yvals, yfit, wyErrorbars = False, yErrorbars=None):
+    if (wyErrorbars):
+        try:
+            params = optimization.curve_fit(gaussian, xvals, yvals, p0 = [xvals[np.argmax(yvals)], np.var(yvals), yvals[np.argmax(yvals)], 0], sigma=yErrorbars)
+            params2 = optimization.curve_fit(gaussianWithLinBackground, xvals, yvals, p0 = (tuple(params[0])+(0,)), sigma=yErrorbars)
+            params3 = optimization.curve_fit(skewWithBackground, xvals, yvals, p0 = (tuple(params2[0])+(1,)), sigma=yErrorbars)
+        except RuntimeError or RuntimeWarning:
+            print("Fit without error bars!")
+            return fitGaussianProfile(xvals,yvals,yfit)
+    else:
+        try:
+            params = optimization.curve_fit(gaussian, xvals, yvals, p0 = [xvals[np.argmax(yvals)], 1, np.max(yvals)-np.min(yvals), np.min(yvals)])
+            params2 = optimization.curve_fit(gaussianWithLinBackground, xvals, yvals, p0 = (tuple(params[0])+(0,)))
+            params3 = optimization.curve_fit(skewWithBackground, xvals, yvals, p0 = (tuple(params2[0])+(1,)))
+        except RuntimeError or RuntimeWarning:
+            print("Data could not be fitted well.")
+            return []
+    yfit += skewWithBackground(xvals, *params3[0])
+    # returns a tuple with all fitted parameters for skewWithBackground
+    return params3
+
+def returnGaussianProfileParams(xvals, yvals,  wyErrorbars = False, yErrorbars=None):
+    if (wyErrorbars):
+        try:
+            params = optimization.curve_fit(gaussian, xvals, yvals, p0 = [np.argmax(yvals), 1, np.max(yvals)-np.min(yvals), 0], sigma=yErrorbars, absolute_sigma=True)
+            params2 = optimization.curve_fit(gaussianWithLinBackground, xvals, yvals, p0 = (tuple(params[0])+(0,)), sigma=yErrorbars, absolute_sigma=True)
+            params3 = optimization.curve_fit(skewWithBackground, xvals, yvals, p0 = (tuple(params2[0])+(1,)), sigma=yErrorbars, absolute_sigma=True)
+        except RuntimeError or RuntimeWarning:
+            print "Fit without error bars!"
+            return fitGaussianProfile(xvals,yvals,yfit)
+    else:
+        try:
+            params = optimization.curve_fit(gaussian, xvals, yvals, p0 = [np.argmax(yvals), 1, 1, 1])
+            params2 = optimization.curve_fit(gaussianWithLinBackground, xvals, yvals, p0 = (tuple(params[0])+(0,)))
+            params3 = optimization.curve_fit(skewWithBackground, xvals, yvals, p0 = (tuple(params2[0])+(1,)))
+        except RuntimeError or RuntimeWarning:
+            print "Data could not be fitted well."
+            return []
+    return params3[0]
+    
+def fittedGaussianProfile(xvals, yfit, params):
+    yfit += skewWithBackground(xvals, *params)
+    
 DEVICENUMBER = 1
 FILEPATH = "ADWin programs"
 BTL = "\\ADwin9.btl"
-#PROCESS = "\Main_Process.T91"
+BTLProII = "\\ADwin12.btl"
+TRIGGERPROCESS = "\Trigger_ADwinGOLD.TC1"
+EVENTSOURCEPROCESS = "\EventSource_ADwinGOLD.TC2"
 FAST_PROCESSES = "\Fast_Processes.T91" #processes which run with a small PROCESS_DELAY
-SLOW_PROCESSES = "\Slow_Processes.T92" #processes which run with a rather long PROCESS_DELAY
+FAST_PROCESSES_PRO = "\Fast_Processes.TC1" # event trigger source running on ADwin Pro II
+SLOW_PROCESSES = "\Slow_Processes.T92" #processes which run with a rather long PROCESS_DELAY on ADWin Gold
+SLOW_PROCESSES_PRO = "\Slow_Processes.TC2" # event trigger source running on ADwin Pro II
+
 
 time_unit = 0
 
@@ -64,58 +132,128 @@ import design
 from SpectrumAnalyzer import FSL
 
 
+
+class OpticalDensityPlot(QtGui.QMainWindow):
+    def __init__(self, tlight, tshadow):
+        super(OpticalDensityPlot, self).__init__()
+        self._main = QtWidgets.QWidget()
+        self.setCentralWidget(self._main)
+        layout = QtWidgets.QVBoxLayout(self._main)
+        
+        fig = Figure(figsize=(5, 3))
+        static_canvas = FigureCanvas(fig)
+        layout.addWidget(static_canvas)
+        self.addToolBar(NavigationToolbar(static_canvas, self))
+        
+        self._static_ax = static_canvas.figure.subplots()
+        
+        OD = np.log(tlight/tshadow)
+        y = OD.flatten()
+        ydata,xdata = np.histogram(y, bins=100)
+        
+        pcm = self._static_ax.pcolor(OD,cmap='RdBu_r',norm=colors.SymLogNorm(linthresh=0.03, linscale=0.03,
+                                              vmin=xdata[:-1][np.argmax(ydata)], vmax=np.max(OD)))
+        fig.colorbar(pcm)
+        
+
+class HistogramLUTThread(QtGui.QMainWindow):
+    def __init__(self,imgItem):
+        QtGui.QMainWindow.__init__(self)
+        os.chdir("Y:\Experimental Control\Python Experimental Control")
+        uic.loadUi('design5.ui', self)
+        
+        #vb = pg.ViewBox()
+        #vb.setAspectLocked()
+        #self.v.setCentralItem(vb)
+        
+        #vb.addItem(imgItem)
+        #vb.autoRange()
+        self.w.setImageItem(imgItem)
+        
+        
+
 class KnielTableThread(QtGui.QMainWindow):
     def __init__(self, parent=None):
         QtGui.QMainWindow.__init__(self,parent)
         os.chdir("Y:\Experimental Control\Python Experimental Control")
         uic.loadUi('design3.ui', self)
-        self.table.setWindowTitle("Kniel Sequence")
-        self.rowNumber = energy3000.getStepsNumber(0)
-        self.colNumber = 7
-        self.update = True
-        self.table.setRowCount(self.rowNumber)
-        self.table.setColumnCount(self.colNumber)
-        horHeaders = ["Time [ms]", "SV [V]", "SC [A]", "SP [W]", \
-                      "Bank", "Type", "Mode"]
-        self.table.setHorizontalHeaderLabels(horHeaders)
-        energy3000.setModes(3,1)
-        # read data from kniel power supply
-        for row in range(self.rowNumber):
-            params = energy3000.getStepParams(row)
-            for col, param in enumerate(params):
-                self.table.setItem(row, col, QTableWidgetItem(str(param)))
 
-        # on change of cell content, transfer it to power supply
-        self.table.cellChanged.connect(self.transferParam)
-    def updateTable(self):
-        self.update = False
-        for row in range(self.rowNumber):
-            params = energy3000.getStepParams(row)
+        # first table showing the different steps of a sequence        
+        self.sequenceSteps.setRowCount(energy3000.getStepsNumber(0))
+        self.sequenceSteps.setColumnCount(4)           
+        self.sequenceSteps.setHorizontalHeaderLabels(["Bank", "Type", "Mode", "Time [s]"] )
+
+        #second table showing the parameters of the different banks
+        self.bankParameters.setRowCount(50)
+        self.bankParameters.setColumnCount(3)
+        self.bankParameters.setHorizontalHeaderLabels(["SV [V]", "SC [A]", "SP [W]"])
+
+        # set to operation mode "sequence" and control mode "remote" in order to read data from kniel power supply
+        energy3000.setModes(3,1) 
+        # read data from kniel power supply
+        self.updateTables()
+
+        self.addStep.clicked.connect(lambda:self.changeStepNumber(1))
+        self.delStep.clicked.connect(lambda:self.changeStepNumber(-1))
+
+        # transfer steps to power supply
+        self.transSteps.clicked.connect(self.transferSteps)
+        # transfer banks to power supply
+        self.transBankParams.clicked.connect(self.transferBanks)
+
+# read the sequence parameters from Kniel power supply
+    def updateTables(self):
+        self.sequenceSteps.setRowCount(energy3000.getStepsNumber())
+        # first read in the steps from sequence 000
+        for row in range(self.sequenceSteps.rowCount()):
+            energy3000.setStepNumber(row)
+            params = energy3000.getStepParams()
             for col, param in enumerate(params):
-                self.table.item(row, col).setText(str(param))
-        self.update = True
-                
-    def transferParam(self, row, col):
-        if col == 0 and self.update:
-            energy3000.setStepTime(row, float(self.table.item(row,col).text())/1000)
-        if col == 1 and self.update:
-            energy3000.setStepVoltage(row, float(self.table.item(row,col).text()))
-        if col == 2 and self.update:
-            energy3000.setStepCurrent(row, float(self.table.item(row,col).text()))
-        if col == 3 and self.update:
-            energy3000.setStepPower(row, float(self.table.item(row,col).text()))
-        if col == 4:
-            energy3000.setStepBank(int(self.table.item(row,col).text()))
-            energy3000.setActiveBank(int(self.table.item(row,col).text()))
-            self.update = False
-            self.table.item(row, 1).setText(str(energy3000.getSetVoltage()))
-            self.table.item(row, 2).setText(str(energy3000.getSetCurrent()))
-            self.table.item(row, 3).setText(str(energy3000.getSetPower()))
-            self.update = True
-        if col == 5 and self.update:
-            energy3000.setStepType(row, int(self.table.item(row,col).text()))
-        if col == 6 and self.update:
-            energy3000.setStepMode(row, int(self.table.item(row,col).text()))
+                self.sequenceSteps.setItem(row, col, QTableWidgetItem(str(param)))
+        # then read in the parameters of all banks
+        for row in range(self.bankParameters.rowCount()):
+            energy3000.setActiveBank(row)
+            params = energy3000.getBankParams()
+            for col, param in enumerate(params):                    
+                self.bankParameters.setItem(row,col, QTableWidgetItem(str(param)))
+
+    def changeStepNumber(self,sign):
+        if (sign == 1):
+            self.sequenceSteps.insertRow(self.sequenceSteps.rowCount())
+        else:
+            self.sequenceSteps.removeRow(self.sequenceSteps.rowCount()-1)
+
+    # transfer step parameters to power supply
+    def transferSteps(self):
+        # write a dictionary into energy3000.seq which will be given as parameter to function energy3000.writeSequence(..)
+        col_dict = {0:'BANK', 1:'TYPE', 2:'MODE',3:'TIME'}
+        tmp_dict = {}
+        for step in range(self.sequenceSteps.rowCount()):
+            for col in range(4):
+                if col == 3:
+                    if (tmp_dict['TYPE']!=3):
+                        tmp_dict[col_dict[col]] = self.sequenceSteps.item(step, col).text().toFloat()[0]
+                    else:
+                        tmp_dict[col_dict[col]] = 0
+                else:
+                    tmp_dict[col_dict[col]] = self.sequenceSteps.item(step, col).text().toInt()[0]
+            energy3000.seq[step] = tmp_dict.copy()
+        energy3000.writeSequence(energy3000.seq, loops=0, mode=2, seqID=0, stretch=1)
+           
+    def transferBanks(self):
+        # write a dictionary into energy3000.seq which will be given as parameter to function energy3000.writeSequence(..)
+        col_dict = {0:'SV', 1:'SC', 2:'SP'}
+        bank_dict = {}
+        tmp_dict = {}
+        for bank in range(50):
+            for col in range(3):
+                bank_dict[col_dict[col]] = self.bankParameters.item(bank, col).text().toFloat()[0] 
+            energy3000.setActiveBank(bank)
+            energy3000.setBankParams(bank_dict)
+
+    def closeEvent(self, event):
+        self.updateTables()
+        energy3000.setModes(2,1)           
         
 
 class ADWinGUIThread(QtGui.QMainWindow):
@@ -123,35 +261,74 @@ class ADWinGUIThread(QtGui.QMainWindow):
         QtGui.QMainWindow.__init__(self,parent)
         os.chdir("Y:\Experimental Control\Python Experimental Control")
         uic.loadUi('design2.ui', self)
+        
+
 
 class MainGUIThread(QtGui.QMainWindow):
+  
+    def showColorCodedPic(self):
+        # self.LUTHisto.update()
+        self.LUTHisto.show()
 
     def setProcessDelay(self):
+        global time_unit, time_unit2
         self.adw.Set_Processdelay(1, self.dialogADwin.process1Delay.value())
         time_unit = 0.025*self.dialogADwin.process1Delay.value()
+        self.adwPro2.Set_Processdelay(1, self.dialogADwin.process1DelayPro.value())
+        time_unit2 = self.dialogADwin.process1DelayPro.value()*0.001
+
+        self.adwPro2.Set_Par(5, int(time_unit/time_unit2))      
+
+        print "Time unit ADwin Gold: ", time_unit, " mus."
+        print "Time unit ADwin Pro II: ", time_unit2, " mus."
+        print "Trigger interval: ", int(time_unit/time_unit2), "."
         
     def showKnielTable(self):
-        self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
-        energy3000.setModes(3,1)
+        self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111) # switch off power supply
+        energy3000.setModes(3,1) # set to remote, sequence
         self.knielTable.show()
 
 
     def __init__(self, parent=None):
+        global camObject, camObject2, energy3000
         QtGui.QMainWindow.__init__(self,parent)
         os.chdir("Y:\Experimental Control\Python Experimental Control")
         uic.loadUi('design.ui', self)
-        # connecting to ADwin
+		
+        #load table for imaging powers
+        #self.imagPowerTable = np.loadtxt("optimum_light_level_vs_detuning.csv")
+        
+        # connecting to ADwin Gold
         global time_unit
         try:
             self.adw = ADwin(DEVICENUMBER, 1)
             # Abfrage des freien Speichers im externen DRAM
-            print 'Free_Mem:', self.adw.Free_Mem(3), 'Bytes'
-            # one ADwin time unit in 탎
+            print 'Free_Mem ADwin Gold:', self.adw.Free_Mem(3), 'Bytes'
+            # one ADwin Gold time unit in 탎
             processdelay1 = self.adw.Get_Processdelay(1)
             time_unit = self.adw.Get_Processdelay(1)*0.025
-            print "Process 1 delay: ", processdelay1
+            print "ADwin Gold, time unit: ", time_unit                                          
+            print "ADwin Gold, Process 1 delay: ", processdelay1
         except ADwinError, e:
-                print '***', e
+            print '***', e
+                
+        # connecting to ADwin Pro II
+        global time_unit2
+        try:
+            self.adwPro2 = ADwin(2, 1)
+            # Abfrage des freien Speichers im externen DRAM
+            print 'Free_Mem ADwin Pro II:', self.adwPro2.Free_Mem(3), 'Bytes'
+            processDelayPro = self.adwPro2.Get_Processdelay(1)
+            # one ADwin Pro II time unit in 탎
+            time_unit2 = self.adwPro2.Get_Processdelay(1)*0.001
+
+            #setting the trigger interval
+            self.adwPro2.Set_Par(5, int(time_unit/time_unit2))
+            print "Trigger interval: ", int(time_unit/time_unit2)
+            
+            print "ADwin Pro II, Process 1 delay: ", self.adwPro2.Get_Processdelay(1)
+        except ADwinError, e:
+            print '***', e
         
         ####################################################
                 
@@ -164,20 +341,30 @@ class MainGUIThread(QtGui.QMainWindow):
         self.dialogADwin.process1Delay.setValue(self.adw.Get_Processdelay(1))
         self.dialogADwin.getProcess1Delay.clicked.connect(lambda: self.dialogADwin.process1Delay.setValue(self.adw.Get_Processdelay(1)))
         self.dialogADwin.process1Delay.valueChanged.connect(self.setProcessDelay)
+        self.dialogADwin.getProcess1Delay.clicked.connect(self.setProcessDelay)
+
+        self.dialogADwin.process1DelayPro.setValue(self.adwPro2.Get_Processdelay(1))
+        self.dialogADwin.getProcess1DelayPro.clicked.connect(lambda: self.dialogADwin.process1DelayPro.setValue(self.adwPro2.Get_Processdelay(1)))
+        self.dialogADwin.process1DelayPro.valueChanged.connect(self.setProcessDelay)
+        self.dialogADwin.getProcess1DelayPro.clicked.connect(self.setProcessDelay)
+        
         self.dialogADwin.adwinBoot.clicked.connect(lambda:self.adw.Boot(self.adw.ADwindir + BTL))
         self.dialogADwin.processCombo.addItem("Fast processes")
         self.dialogADwin.processCombo.addItem("Slow processes")
-        self.processDict = {0:FILEPATH + FAST_PROCESSES, 1:FILEPATH + SLOW_PROCESSES}
+        self.dialogADwin.processCombo.addItem("Slow processes Pro II")
+        self.dialogADwin.processCombo.addItem("Fast processes Pro II")
+        self.processDict = {0:FILEPATH + FAST_PROCESSES, 1:FILEPATH + SLOW_PROCESSES, 2: FILEPATH+SLOW_PROCESSES_PRO, 3: FILEPATH+FAST_PROCESSES_PRO}
+        self.adwinDict = {0:self.adw, 1: self.adw, 2: self.adwPro2, 3: self.adwPro2}
+        # for ADWin Gold
+        self.dialogADwin.loadProcess.clicked.connect(lambda: self.adwinDict[self.dialogADwin.processCombo.currentIndex()].Load_Process(self.processDict[self.dialogADwin.processCombo.currentIndex()]))
         self.dialogADwin.processCombo.setCurrentIndex(1)
-##        isrunning = True
-##        try:
-##            if self.adw.Process_Status(2) <= 0:
-##                isrunning = False
-##        except ADwinError, e:
-##            print '***', e      
-##        self.dialogADwin.isRunning.setCheckState(isrunning)
-        self.dialogADwin.processCombo.currentIndexChanged.connect(lambda: self.dialogADwin.isRunning.setCheckState(self.adw.Process_Status(self.dialogADwin.processCombo.currentIndex()+1)))
-        self.dialogADwin.loadProcess.clicked.connect(lambda: self.adw.Load_Process(self.processDict[self.dialogADwin.processCombo.currentIndex()]))
+        # for ADWin Pro II
+        self.dialogADwin.adwinPro2Boot.clicked.connect(lambda:self.adwPro2.Boot(self.adwPro2.ADwindir + BTLProII))
+        # a class variable to check without asking ADwin if a sequence has been asked to stop by user without taking precious processor time from ADwin
+        self.noUserInterrupt = True
+        self.waitForParamChange = False        
+
+        self.dialogADwin.processCombo.currentIndexChanged.connect(lambda: self.dialogADwin.isRunning.setCheckState(self.adwinDict[self.dialogADwin.processCombo.currentIndex()].Process_Status(self.dialogADwin.processCombo.currentIndex()+1)))
         self.runstop = {0:self.adw.Stop_Process, 1:self.adw.Start_Process}
         self.dialogADwin.isRunning.stateChanged.connect(lambda: self.runstop[int(self.dialogADwin.isRunning.isChecked())](self.dialogADwin.processCombo.currentIndex()+1))
         #make the dialog appear on clicking button
@@ -190,10 +377,21 @@ class MainGUIThread(QtGui.QMainWindow):
         self.cam2Timebase.setCurrentIndex(1)
 
         
+        
+        self.roiProfilePlot.addItem("Vertical Profile")
+        self.roiProfilePlot.addItem("Horizontal Profile")
+        self.roiProfilePlot.setCurrentIndex(1)
+        self.plotOptions.addItem("ROI Counts")
+        self.plotOptions.addItem("ROI Maximum")
+        self.plotOptions.addItem("ROI Maximum/ ROI Minimum")
+        self.plotOptions.setCurrentIndex(0)
+        self.plotOptions.currentIndexChanged.connect(self.resetTiming)
+        
         self.checkboxes.addItem("coolerTTL")
         self.checkboxes.addItem("RFdriverTTL")
         self.checkboxes.addItem("MOT current")
         self.checkboxes.addItem("MOT Shutter")
+        self.checkboxes.addItem("Fiber Laser Mod")
         self.analogOuts.addItem("VCA Cooler")
         self.analogOuts.addItem("MOT coil current")
         self.analogOuts.addItem("VCO Beat Offset")
@@ -206,15 +404,14 @@ class MainGUIThread(QtGui.QMainWindow):
         self.operationMode.addItem("Standard")
         self.operationMode.addItem("Lab")
         self.operationMode.addItem("Sequence")
-        self.operationMode.currentIndexChanged.connect(lambda: energy3000.setOperationMode(\
-                self.operationMode.currentIndex()))
+        self.operationMode.currentIndexChanged.connect(self.knielChangeOpMod)
         self.operationMode.setCurrentIndex(energy3000.opMode)
 
         energy3000.modChange.connect(lambda: self.operationMode.setCurrentIndex(energy3000.opMode))
         energy3000.modChange.connect(lambda: self.controlMode.setCurrentIndex(energy3000.ctrlMode))
         
         # the dictionary of all ComboBoxes
-        self.dict = { self.checkboxes.itemText(3):self.motShutter, self.checkboxes.itemText(0) : self.coolerTTL, self.checkboxes.itemText(1):self.RFdriverTTL, self.analogOuts.itemText(0) : 1, self.analogOuts.itemText(1) : 4, self.checkboxes.itemText(2):self.motCurrentTTL, self.analogOuts.itemText(2):3}
+        self.dict = { self.checkboxes.itemText(4): self.fiberLaserMod, self.checkboxes.itemText(3):self.PALaserShutt, self.checkboxes.itemText(0) : self.coolerTTL, self.checkboxes.itemText(1):self.RFdriverTTL, self.analogOuts.itemText(0) : 1, self.analogOuts.itemText(1) : 4, self.checkboxes.itemText(2):self.motCurrentTTL, self.analogOuts.itemText(2):3}
 
 
         self.fig = plt.figure(dpi=500)
@@ -238,6 +435,14 @@ class MainGUIThread(QtGui.QMainWindow):
         self.camChoices = {0:camObject, 1:camObject2}
         
         self.img = pg.ImageItem()
+        # # get a colormap
+        # colormap = cm.get_cmap("nipy_spectral")
+        # colormap._init()
+        # self.lut = (colormap._lut * 255).view(np.ndarray)
+        # self.img.setLookupTable(self.lut, update=False)
+        self.LUTHisto = HistogramLUTThread(self.img)
+                        
+        self.savePicture.clicked.connect(lambda: self.img.save(str("%s" % self.picFilename.text())))
                 
         # everything for the ccd camera plot
         ### camPicture is a GraphicsLayoutWidget from the pyqtgraph library. For a tutorial, how to embed
@@ -252,19 +457,24 @@ class MainGUIThread(QtGui.QMainWindow):
         self.p.addItem(self.img)
         self.img.setImage(self.camChoices[self.camChoice.currentIndex()].pic)
         self.roi = pg.RectROI([100, 100], [200, 200], pen=(0,9))
+        self.roi2 = pg.RectROI([200,200], [300,300], pen=(0,10))
         self.roi.setState(self.camChoices[self.camChoice.currentIndex()].ROIState)
+        
         self.p.addItem(self.roi)
+        self.p.addItem(self.roi2)
         '''
         adding the possibility of changing the height and/or width of the ROI
         '''
         self.roi.addScaleHandle([0.5, 1], [0.5, 0.5])
         self.roi.addScaleHandle([0, 0.5], [0.5, 0.5])
+        self.roi.addRotateFreeHandle([0.5,0.5], [0,0])
         self.roi.setZValue(10)    
         
         #self.roi.sigRegionChanged.connect(self.updatePlots)
         self.roi.sigRegionChangeFinished.connect(self.updatedROI)
-              
-        self.ROIDrkCnts = np.zeros(self.roi.getArrayRegion(self.camChoices[self.camChoice.currentIndex()].pic, self.img).shape)
+        # array for background counts in read-out pictures from pixelfly qe
+        self.Background = np.zeros(np.shape(camObject.pic))
+        self.Background_IRScatt = np.zeros(np.shape(camObject.pic))
         self.ROIBackground = np.zeros(self.roi.getArrayRegion(self.camChoices[self.camChoice.currentIndex()].pic, self.img).shape)
         self.ROIBackgroundStdDev = np.zeros(self.roi.getArrayRegion(self.camChoices[self.camChoice.currentIndex()].pic, self.img).shape)
         self.spatialROIBackground = np.zeros(self.ROIBackground.shape[1])
@@ -285,7 +495,7 @@ class MainGUIThread(QtGui.QMainWindow):
         self.exposureTime.setOpts(value = 35, step = 1, int = True)
                 
         #everything for the plot of the ROISum
-        self.p2 = self.ROISumPlot.addPlot(title="Plot of ROISum")
+        self.p2 = self.ROISumPlot.addPlot()
         self.curve = self.p2.plot(pen='y')
         self.length = 1000
         self.ydata = np.zeros(0)
@@ -294,15 +504,7 @@ class MainGUIThread(QtGui.QMainWindow):
 
         #drawing an isocurve from data in ROI
         self.p3 = self.ROIShapeCurve.addPlot(colspan=2)
-        #self.p5 = camObject.roiShapeCurve2.addPlot(colspan=2)
-        
-
-        #plotting the measured voltages at the analog inputs
-        self.p4 = self.analogInPlots.addPlot() #creates a PlotItem
-        self.analogIn3Plot = self.p4.plot(pen=None) #creates a PlotDataItem
-        self.analogIn4Plot = self.p4.plot(pen=None)
-        self.analogIn5Plot = self.p4.plot(pen=None)
-        
+        #self.p5 = camObject.roiShapeCurve2.addPlot(colspan=2)       
         
         #everything for communcation with Spectrum Analyzer
 ##        self.detuning.setDecMode()
@@ -312,7 +514,9 @@ class MainGUIThread(QtGui.QMainWindow):
 ##        self.measureThread.start()
                   
         '''
-        define a thread for the camera data taking
+        define a thread for the camera data taking,
+        # Subclassing QObject and using moveToThread
+        # http://blog.qt.digia.com/blog/2007/07/05/qthreads-no-longer-abstract
         '''
         self.dataStream = QtCore.QThread()
         camObject.moveToThread(self.dataStream)
@@ -340,40 +544,69 @@ class MainGUIThread(QtGui.QMainWindow):
         self.ZeemanLightTTL.setParams(self.adw, 18)
         self.cameraTTL.setParams(self.adw, 19)
         self.ZeemanCurrentTTL.setParams(self.adw, 20)
-        self.motCurrentTTL.setParams(self.adw, 21)
-        self.OvenShutterTTL.setParams(self.adw, 22)
+        self.motCurrentTTL.setParams(self.adw, 28) # actually goes to Kniel at the moment
+        self.OvenShutterTTL.setParams(self.adw, 22)    
+        
         self.fiberLaserMod.setParams(self.adw, 24)
         self.RFdriverTTL.setParams(self.adw, 25)
-        self.zeemanShutter.setParams(self.adw, 26)
-        self.motShutter.setParams(self.adw, 27)
-        self.camera2TTL.setParams(self.adw, 28)
+        self.knielStepTrig.setParams(self.adw, 26)
+        self.imagingBeam.setParams(self.adwPro2, 1)
+        self.imagingBeamSync.setParams(self.adwPro2,2)
+        self.PALaserShutt.setParams(self.adw, 27)
+        self.camera2TTL.setParams(self.adwPro2, 0)
+        self.daqEnable.setParams(self.adw, 29)
+        self.femtoShutter.setParams(self.adw, 30)
+        self.fsSync.setParams(self.adw, 31)
+        self.PAbeamShutter.setParams(self.adwPro2, 3)
+        self.tofBlocker.setParams(self.adwPro2,4)
+        
 
         # initialize AnalogOuts (derived from pyqtgraphs SpinBox)
-        self.vcaCooler.setParams(self.adw, 1, 0, 1.22, 2, 0.01) 
+        self.vcaCooler.setParams(self.adw, 1, 0, 0.68, 2, 0.01) 
         self.vcaRepumper.setParams(self.adw, 2, 0, 1.34, 2, 0.01)
         self.vcoBeatOffset.setParams(self.adw, 3, 0.0, 10.0, 2, 0.01)
-        self.vcaCooler.setValue(1.22)        
+        self.vcaCooler.setValue(0.69)
+        self.vcaCooler.setAnalogOutput()
         self.vcaRepumper.setValue(1.34)        
-        self.vcoBeatOffset.setValue(4.5)
+        self.vcoBeatOffset.setValue(0.7)
         self.fiberLaserAnalogIn.setParams(self.adw, 5, 0.0, 10.0, 2, 0.01)
         self.RFdriveramp.setParams(self.adw, 6, 0.0, 5.0, 2, 0.01)
-        self.zeemanVCO.setParams(self.adw, 7, 0.0, 17, 2, 0.01)
-        self.zeemanVCO.setValue(7)
-        
-        self.zeemanVCA.setParams(self.adw, 8, 0.0, 4.4, 2, 0.01)
-        self.zeemanVCA.setValue(4.4)
+        self.imagMod.setParams(self.adw, 7, 0.0, 5.0, 2, 0.01)
+        self.imagMod.setValue(1.05)
 
-        self.vcaCooler.setAnalogOutput()
+        self.zeemanSlowFreq.setParams(self.adwPro2, 3, 0.0, 10, 2, 0.01)
+        self.zeemanSlowFreq.setValue(7.64)
+        self.zeemanSlowFreq.valueChanged.connect(self.zeemanSlowFreq.setAnalogOutput)
+        self.zeemanSlowFreq.setAnalogOutput()
+
+        self.imagingFreq.setParams(self.adwPro2, 1, 0.0, 10, 2, 0.01)
+        self.imagingFreq.setValue(4.93)
+        self.imagingFreq.valueChanged.connect(self.imagingFreq.setAnalogOutput)
+        self.imagingFreq.setAnalogOutput()
+
+        self.coolerFreq.setParams(self.adwPro2, 2, 0.0, 10, 2, 0.01)
+        self.coolerFreq.setValue(3.72)
+        self.coolerFreq.valueChanged.connect(self.coolerFreq.setAnalogOutput)
+        self.coolerFreq.setAnalogOutput()
+
+        self.repumpFreq.setParams(self.adwPro2, 4, 0.0, 10, 2, 0.01)
+        self.repumpFreq.setValue(8.91)
+        self.repumpFreq.valueChanged.connect(self.repumpFreq.setAnalogOutput)
+        self.repumpFreq.setAnalogOutput()
+
+                
         self.vcaRepumper.setAnalogOutput()
         self.vcoBeatOffset.setAnalogOutput()
-        self.zeemanVCA.setAnalogOutput()
-        self.zeemanVCO.setAnalogOutput()
+        #self.zeemanVCA.setAnalogOutput()
+        self.imagMod.setAnalogOutput()
 
         #a couple of DoubleSpinBoxes
         self.startVolt.setSingleStep(0.01)
         self.endVolt.setSingleStep(0.01)
         self.stepVolt.setSingleStep(0.01)
         self.saturation.setValue(60.0)
+
+        self.scCavLockSP.valueChanged.connect(lambda: self.adwPro2.Set_FPar(55, self.scCavLockSP.value()))        
 
         #couple of SpinBoxes
         self.aSyncmodeExptime.setMinimum(10)
@@ -399,30 +632,29 @@ class MainGUIThread(QtGui.QMainWindow):
         self.startStream.clicked.connect(self.startVideo)
         self.stopStream.clicked.connect(self.stopVideo)
         
+        self.scanImgFreq.clicked.connect(self.resAbsorpImgFreqScan)
         self.takeBackground.clicked.connect(self.getBackgroundCounts)
         self.averageCountInitiate.clicked.connect(self.getAverageCounts)
         self.resetBackground.clicked.connect(self.resetBackgroundCounts)
         self.vcaCooler.valueChanged.connect(self.vcaCooler.setAnalogOutput)
         self.vcaRepumper.valueChanged.connect(self.vcaRepumper.setAnalogOutput)
         self.vcoBeatOffset.sigValueChanging.connect(self.vcoBeatOffset.setAnalogOutput)
-##        self.vcoBeatOffset.valueChanged.connect(self.displayDetuning)
+        
         self.vcoBeatOffset.valueChanged.connect(self.calculateScaling)
-        #self.vcaZeeman.valueChanged.connect(self.vcaZeeman.setAnalogOutput)
-        self.motCoilCurrent.valueChanged.connect(lambda: energy3000.setCurrent(self.motCoilCurrent.value()))
+        self.motCoilCurrent.valueChanged.connect(lambda: self.knielChangeCurrent(self.motCoilCurrent.value()))
+        self.knielMaxCurrent.clicked.connect(lambda: self.knielChangeCurrent(125) if self.knielMaxCurrent.isChecked() else self.knielChangeCurrent(60)) 
+        self.knielStepTrig.clicked.connect(self.knielStepTrig.setDigitalOutput)
         self.fiberLaserAnalogIn.valueChanged.connect(self.fiberLaserAnalogIn.setAnalogOutput)
         self.RFdriveramp.valueChanged.connect(self.RFdriveramp.setAnalogOutput)
-        self.zeemanVCO.valueChanged.connect(self.zeemanVCO.setAnalogOutput)
-        self.zeemanVCA.valueChanged.connect(self.zeemanVCA.setAnalogOutput)
+        self.imagMod.valueChanged.connect(self.imagMod.setAnalogOutput)
         self.active_slowerbeam.stateChanged.connect(lambda: self.adw.Set_Par(23, int(self.active_slowerbeam.isChecked())))
         self.active_slowerbeam_2.stateChanged.connect(lambda: self.adw.Set_Par(23, int(self.active_slowerbeam_2.isChecked())))
         self.RFdriverswitch.stateChanged.connect(lambda: self.adw.Set_Par(26, int(self.RFdriverswitch.isChecked())))
-        #self.fiberLaserOn.stateChanged.connect(lambda: self.adw.Set_Par(27, int(self.fiberLaserOn.isChecked())))
         self.fixedFlightTimeCheck.stateChanged.connect(lambda: self.adw.Set_Par(38, int(self.fixedFlightTimeCheck.isChecked())))
         self.switchOpticalTrap.stateChanged.connect(lambda: \
         self.adw.Set_Par(20, int(self.switchOpticalTrap.isChecked())))
         self.motBeamsOn.stateChanged.connect(lambda: self.adw.Set_Par(40, int(self.motBeamsOn.isChecked())))
-
-
+        
         self.targetDetuning.valueChanged.connect(lambda: self.adw.Set_FPar(13, self.targetDetuning.value()))
         self.targetDetuning.valueChanged.connect(lambda: self.adw.Set_Par(16, int(round((self.vcoBeatOffset.value()-self.targetDetuning.value())/0.007*self.rampingSpeed.value()/time_unit))))    
         
@@ -432,17 +664,17 @@ class MainGUIThread(QtGui.QMainWindow):
         self.rampingSpeed.valueChanged.connect(lambda: self.adw.Set_FPar(25, 0.007/self.rampingSpeed.value()*time_unit))
 
         self.vcaCoolerTarget.valueChanged.connect(lambda: self.adw.Set_FPar(15, self.vcaCoolerTarget.value()))
-        self.vcaCoolerTarget.valueChanged.connect(lambda: self.adw.Set_FPar(28, (self.vcaCooler.value()-self.vcaCoolerTarget.value())/(int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning.value())/(0.007/self.rampingSpeed.value()*time_unit))))))
+        self.vcaCoolerTarget.valueChanged.connect(lambda: self.adw.Set_FPar(28, abs((self.vcaCooler.value()-self.vcaCoolerTarget.value())/(int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning.value())/(0.007/self.rampingSpeed.value()*time_unit)))))))
         
         self.vcaRepumperTarget.valueChanged.connect(lambda: self.adw.Set_FPar(16, self.vcaRepumperTarget.value()))
-        self.vcaRepumperTarget.valueChanged.connect(lambda: self.adw.Set_FPar(29, (self.vcaRepumper.value() - self.vcaRepumperTarget.value())/(int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning.value())/(0.007/self.rampingSpeed.value()*time_unit)))))) 
+        self.vcaRepumperTarget.valueChanged.connect(lambda: self.adw.Set_FPar(29, abs((self.vcaRepumper.value() - self.vcaRepumperTarget.value())/(int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning.value())/(0.007/self.rampingSpeed.value()*time_unit))))))) 
 
         self.maxMOTCurrent.valueChanged.connect(lambda: self.adw.Set_FPar(39, self.maxMOTCurrent.value()))
-        self.flightTimeFinal.valueChanged.connect(lambda: self.adw.Set_Par(14, int(round(self.flightTimeFinal.value()/time_unit))))
+        self.flightTimeFinal.valueChanged.connect(lambda: self.adw.Set_Par(14, int(math.ceil(self.flightTimeFinal.value()/time_unit))))
         self.exposureTime.valueChanged.connect(lambda:camObject.setExposure(self.exposureTime.value()))
         self.exposureTime.valueChanged.connect(self.calculateScaling)
         self.cam2exposureTime.valueChanged.connect(lambda: camObject2.exposure_time(self.cam2exposureTime.value(),self.cam2Timebase.currentIndex()+1))
-
+        
         self.pgain.valueChanged.connect(self.transferPIDParams)
         self.igain.valueChanged.connect(self.transferPIDParams)
         self.dgain.valueChanged.connect(self.transferPIDParams)
@@ -456,8 +688,8 @@ class MainGUIThread(QtGui.QMainWindow):
                                   '100':self.ZeemanLightTTL, '1000':self.cameraTTL, \
                                   '10000':self.ZeemanCurrentTTL, '100000':self.motCurrentTTL,\
                                   '1000000':self.OvenShutterTTL, '10000000':self.fiberLaserMod,\
-                                  '100000000':self.RFdriverTTL, '1000000000':self.zeemanShutter,\
-                                  '10000000000':self.motShutter}
+                                  '100000000':self.RFdriverTTL, '1000000000':self.imagingBeam,\
+                                  '10000000000':self.PALaserShutt}
         if self.adw.Process_Status(2)==1:
                 ttloutstate = int(self.adw.Get_Par(3))
                 for ttl in checkboxes:
@@ -467,31 +699,59 @@ class MainGUIThread(QtGui.QMainWindow):
         #connecting the checkboxes of the graphical interface
         self.coolerTTL.stateChanged.connect(self.coolerTTL.setDigitalOutput)
         self.repumpTTL.stateChanged.connect(self.repumpTTL.setDigitalOutput)
-        self.repumpTTL.stateChanged.connect(self.resetTiming)
+        self.resetPlot.clicked.connect(self.resetTiming)
         self.ZeemanLightTTL.stateChanged.connect(self.ZeemanLightTTL.setDigitalOutput)
         self.cameraTTL.stateChanged.connect(self.cameraTTL.setDigitalOutput)
         self.ZeemanCurrentTTL.stateChanged.connect(self.ZeemanCurrentTTL.setDigitalOutput)
         self.OvenShutterTTL.stateChanged.connect(self.OvenShutterTTL.setDigitalOutput)
         self.motCurrentTTL.stateChanged.connect(self.switchPowerSupply)
+        self.motCurrentTTL.stateChanged.connect(self.resetTiming)
+        self.fsSync.stateChanged.connect(self.fsSync.setDigitalOutput)
         self.fiberLaserMod.stateChanged.connect(self.fiberLaserMod.setDigitalOutput)
         self.RFdriverTTL.stateChanged.connect(self.RFdriverTTL.setDigitalOutput)
-        self.motShutter.stateChanged.connect(self.motShutter.setDigitalOutput)
-        self.zeemanShutter.stateChanged.connect(self.zeemanShutter.setDigitalOutput)
-        self.motXMonitor.stateChanged.connect(self.plotAnalogIn)
-        self.motYMonitor.stateChanged.connect(self.plotAnalogIn)
-        self.motZMonitor.stateChanged.connect(self.plotAnalogIn)
+        self.PALaserShutt.stateChanged.connect(self.PALaserShutt.setDigitalOutput)
+        self.femtoShutter.stateChanged.connect(self.femtoShutter.setDigitalOutput)
+        self.imagingBeam.stateChanged.connect(self.imagingBeam.setDigitalOutput)
+        self.imagingBeamSync.stateChanged.connect(self.imagingBeamSync.setDigitalOutput)
+        self.PAbeamShutter.stateChanged.connect(self.PAbeamShutter.setDigitalOutput)
+        self.tofBlocker.stateChanged.connect(self.tofBlocker.setDigitalOutput)
+        
         self.doWiggleCheckbox.stateChanged.connect(self.doWiggle)
         self.camera2TTL.stateChanged.connect(self.camera2TTL.setDigitalOutput)
+        self.daqEnable.stateChanged.connect(self.daqEnable.setDigitalOutput)
         
         #connecting the functions which interact with ADWin programs
         self.startSequence1.clicked.connect(self.startReleaseRecapture)
         self.stopSequence1.clicked.connect(lambda: self.adw.Set_Par(78,1))
-        self.stopSequence1.clicked.connect(lambda: energy3000.setModes(2,1))
+        self.stopSequence1.clicked.connect(lambda: setattr(self, 'noUserInterrupt', False))
+        #self.stopSequence1.clicked.connect(lambda: energy3000.setModes(2,1))
         self.startSequence2.clicked.connect(self.startOpticalTrapLoad)
+        self.startContinuousOpticalTrapLoad.clicked.connect(self.continuouslyLoadOpticalTrap)
+        self.startIonizeMOT.clicked.connect(self.ionizeFromMOT)
+        self.stopIonizeMOT.clicked.connect(lambda: setattr(self, 'noUserInterrupt', False))
+        self.stopIonizeMOT.clicked.connect(lambda: self.adw.Set_Par(78,1))
+        self.stopIonizeMOT.clicked.connect(lambda: self.adwPro2.Set_Par(78,1))
+        # by assigning 1 to Par_78, the corresponding sequence ends at the next 
+        # end of the event loop
+        self.stopSequence2.clicked.connect(lambda: setattr(self, 'noUserInterrupt', False))
         self.stopSequence2.clicked.connect(lambda: self.adw.Set_Par(78,1))
+        self.stopSequence2.clicked.connect(lambda: self.adwPro2.Set_Par(78,1))
+        self.resetROIMean.clicked.connect(lambda: setattr(self, 'ROIMean', 0))
         self.ROIbackground.clicked.connect(lambda: self.takeROIBackground(self.rel_recap_exp_time.value(), self.averageSample.value()))
         self.startScan.clicked.connect(self.measureLoadingRate)
         self.takeBackgroundAsync.clicked.connect(self.aSyncmodeTakeBackground)
+        self.stopScan.clicked.connect(lambda: setattr(self, 'noUserInterrupt', False))
+        self.stopScan.clicked.connect(lambda: self.adw.Set_Par(78,1))
+               
+        self.averageROIProfile.stateChanged.connect(lambda: setattr(self, 'movingAvgIndex', 2))                                                                                      
+        
+        self.targetDetuning.valueChanged.connect(lambda: setattr(self, 'waitForParamChange', False))
+        self.rampingSpeed.valueChanged.connect(lambda: setattr(self, 'waitForParamChange', False))
+        self.vcaCoolerTarget.valueChanged.connect(lambda: setattr(self, 'waitForParamChange', False))
+        self.vcaRepumperTarget.valueChanged.connect(lambda: setattr(self, 'waitForParamChange', False))
+        self.molasseCoolTime.valueChanged.connect(lambda: setattr(self, 'waitForParamChange', False))
+
+        
 
         self.automaticScaling.stateChanged.connect(self.calculateScaling)
         self.scaling.valueChanged.connect(self.calculateScaling)
@@ -503,17 +763,55 @@ class MainGUIThread(QtGui.QMainWindow):
         self.resetSum.clicked.connect(lambda: self.adw.Set_Par(4,1))
         self.startAsync.clicked.connect(self.testAsyncMode)
         self.stopAsync.clicked.connect(self.stopAsyncMode)
-        self.stopPlotCounts.clicked.connect(lambda: self.adw.Set_Par(78,1))
-        self.plotCounts.clicked.connect(self.countAtomsAfterCompression)
+        self.measureTransferFraction.clicked.connect(self.measureTransferEfficiency)
+        self.scanImgFreqDipTrap.clicked.connect(self.resAbsorpImgFreqScan)
+        self.scanImgFreqDipTrapFluorescence.clicked.connect(self.imagFreqScanOpticalTrap)
         
         self.takeDarkCnts.clicked.connect(self.takeDrkCnts)
         self.takeAbsorpImg.clicked.connect(self.resAbsorpImg)
+        self.takeAbsorpImg2.clicked.connect(self.resAbsorpImg2)
+        self.showColorCode.clicked.connect(self.showColorCodedPic)
+        self.maxROICnt.clicked.connect(self.printMaxROICnts)
+
+        self.sweeptoTransferparameters.clicked.connect(lambda: self.sweepParameters(False))
+        self.sweeptoGUIParams.clicked.connect(lambda: self.sweepParameters(True))
         
+
+    def printMaxROICnts(self):
+        maxcnts = np.max(self.roi.getArrayRegion(camObject.pic, self.img))
+        print "Max counts in one ROI pixel: ", maxcnts, "\n"
+
     def switchPowerSupply(self):
         if energy3000.getMode()[1]:
-            energy3000.setControlMode(0)
+            energy3000.setControlMode(0) # change to local
         self.motCurrentTTL.setDigitalOutput()
-        
+               
+    def knielChangeCurrent(self, dest_current):
+        if energy3000.getMode()[1]==0: # if in local
+            energy3000.setControlMode(1) # change to remote
+            if(energy3000.getActiveBank != 0):
+                energy3000.setActiveBank(0)
+            energy3000.setCurrent(dest_current)
+            energy3000.setControlMode(0) # change back to local
+        else:
+            if(energy3000.getActiveBank != 0):
+                energy3000.setActiveBank(0)
+            energy3000.setCurrent(dest_current)
+
+        if(self.motCoilCurrent.value()!=dest_current):
+            self.motCoilCurrent.setValue(dest_current)
+    # in case operation mode is changed to lab, in would be convenient to set 00 as the
+    # active bank
+    def knielChangeOpMod(self):
+        energy3000.opMode = self.operationMode.currentIndex()
+        energy3000.setOperationMode(energy3000.opMode)
+        if (energy3000.opMode==2):
+            if energy3000.getMode()[1]==0 :
+                energy3000.setControlMode(1)
+                energy3000.setActiveBank(0)
+                energy3000.setControlMode(0)
+            else:
+                energy3000.setActiveBank(0)
 
     def doWiggle(self):
         if not(self.doWiggleCheckbox.isChecked()):
@@ -570,31 +868,41 @@ class MainGUIThread(QtGui.QMainWindow):
             self.dict[self.checkboxes.currentText()].nextCheckState()
             QtGui.QApplication.processEvents()
             QtCore.QTimer.singleShot(self.blinkperiod.value()*1000, lambda: self.blinkCheckbox(self.makeblink))
-
-    def writeAnalogTimingGraph(self, channels, outfile, this_header=''):
-        #analogtiminggraph = plt.figure(dpi=500)
-        #ax = analogtiminggraph.add_subplot(111)
+    '''
+    channels is a list of numbers indicating the AO channels, which 
+    are supposed to be read out
+    '''
+    def writeAnalogTimingGraph(self, channels, outfile, this_header=''):     
         self.ax.set_title("Analog Timing Graph")
+        nochannels = len(channels)
         labels = this_header.split('\t')
-        if ( len(channels) != len(labels)):
-            print "Adjust header string!"
-            return
-        i = 0
-        for label in labels:
-            labels[i] = re.sub(r'\[[a-zA-Z ]+\]', '', label).strip()
-            i += 1
+        if ( nochannels != len(labels)):
+            print "Channels argument and header not compatible."
+            labels = ["Ch " + str(i) for i in channels]
+        else:
+            for i,label in enumerate(labels):
+                labels[i] = re.sub(r'\[[a-zA-Z ]+\]', '', label).strip()
         length = int(self.adw.Get_Par(24))
-        process_delay = int(self.adw.Get_Processdelay(1)) 
-        data_arrays = np.zeros((len(channels), length))
+        if (length==0):
+            print "Error: Max Index is 0. No logging happenend."
+            return
+        process_delay = int(self.adw.Get_Processdelay(1))        
+        data_arrays = np.zeros((nochannels, length))
         index = 0
         # copy ADwin global fields into numpy arrays
         for ch in channels:
             if index == 0:
                 # time in ms
-                data_arrays[index] = self.adw.GetData_Long(ch, 1, length)
+                try:
+                    data_arrays[index] = self.adw.GetData_Long(ch, 1, length)
+                except ADwinError, e:
+                    print '***', e
                 data_arrays[index] *= process_delay*0.000025
             else:
-                data_arrays[index] = self.adw.GetData_Float(ch, 1, length)
+                try:
+                    data_arrays[index] = self.adw.GetData_Float(ch, 1, length)
+                except ADwinError, e:
+                    print '***', e
             if index >= 1:
                 self.ax.plot(data_arrays[0], data_arrays[index], label=labels[index])
             index += 1                       
@@ -606,15 +914,77 @@ class MainGUIThread(QtGui.QMainWindow):
         plt.legend(bbox_to_anchor=(0, 1), loc='upper right', ncol=1)
         plt.savefig(outfile[:-4]+".png", bbox_inches='tight')
         self.ax.clear()
-        np.savetxt(outfile, np.transpose(data_arrays), header=this_header, delimiter="\t")
-
-        
-            
+        np.savetxt(outfile, np.transpose(data_arrays), header=this_header, delimiter="\t")      
         
     
     ############### section about functions that interact with ADWin programs ################
+
+    def sweepParameters(self, initial):
+        ####### block for stopping slow sequence and starting a fast sequence##########
+        # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+        self.adwPro2.Stop_Process(2)
+        self.adw.Stop_Process(2)
+        # set ending condition to false
+        self.adw.Set_Par(78,0)
+        self.adwPro2.Set_Par(78,0)
+        # set sequences into waiting loop
+        self.adw.Set_Par(80,0)
+        self.adwPro2.Set_Par(80,0)            
+        ###########################################################################
+        # write current switch off delay
+        self.adw.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit)))
+        self.adwPro2.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit2)))
+        if (initial == False):# sweep to transfer parameters
+            # write current parameters
+            self.adw.Set_FPar(12, self.vcoBeatOffset.value())
+            self.adw.Set_FPar(34, self.vcaCooler.value())
+            self.adw.Set_FPar(35, self.vcaRepumper.value())
+            # write target parameters
+            self.adw.Set_FPar(13, self.targetDetuning_3.value())
+            self.adw.Set_FPar(15, self.vcaCoolerTarget_3.value())
+            self.adw.Set_FPar(16, self.vcaRepumperTarget_3.value())
+        else: # sweep to GUI parameters
+            # write current parameters
+            self.adw.Set_FPar(12, self.targetDetuning_3.value())
+            self.adw.Set_FPar(34, self.vcaCoolerTarget_3.value())
+            self.adw.Set_FPar(35, self.vcaRepumperTarget_3.value())
+            # write target parameters
+            self.adw.Set_FPar(13, self.vcoBeatOffset.value())
+            self.adw.Set_FPar(15, self.vcaCooler.value())
+            self.adw.Set_FPar(16, self.vcaRepumper.value())
+            
+        # write volt steps
+        time = int(math.ceil(abs((self.targetDetuning_3.value()-self.vcoBeatOffset.value())/0.007)/time_unit)) # time in adwin gold units
+        if (time == 0):
+            self.adw.Set_Par(16, 0)
+        else:
+            self.adw.Set_Par(16, time)
+            self.adw.Set_FPar(25, 0.007*time_unit)
+            self.adw.Set_FPar(28, abs(self.vcaCooler.value()-self.vcaCoolerTarget_3.value())/time)
+            self.adw.Set_FPar(29, abs(self.vcaRepumper.value()-self.vcaRepumperTarget_3.value())/time)
+
+        # start sequence both on ADwin Gold and ADwin Pro II
+        # initialize 
+        self.adw.Set_Par(79, 1)
+        self.adwPro2.Set_Par(79,1)
+        # start case 4, but start it on ADWin Pro II first, because the sequence already runs and is triggering.
+        self.adwPro2.Set_Par(80,10)
+        self.adw.Set_Par(80, 10)
+        # since process 1 on ADWIN Gold needs an external trigger, start this process first
+        self.adw.Start_Process(1)
+        # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+        self.adwPro2.Start_Process(1)                      
+
+        while (self.adw.Get_Par(80) != 0):
+            pass
+        self.adwPro2.Stop_Process(1)
+        self.adw.Stop_Process(1)
+        
+
+        
     def takeROIBackground(self, exposure_time, repetitions):
         self.stopVideo()
+        global time_unit
         try:
             self.adw.Stop_Process(2)
             self.adw.Start_Process(1)
@@ -624,124 +994,130 @@ class MainGUIThread(QtGui.QMainWindow):
             self.adw.Set_FPar(35, self.vcaRepumper.value())         # current repumper power
             self.adw.Set_FPar(17, self.vcaCooler.value())           # initial cooler power
             self.adw.Set_FPar(18, self.vcaRepumper.value())         # initial repumper power
+            self.adw.Set_Par(27, int(self.switchOpticalTrap.isChecked()))
             
             # read in all necessary values
-            self.adw.Set_Par(12, int(math.ceil(10000/(self.adw.Get_Processdelay(1)*0.025)))) # 10 ms shutter opening time
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit))) # shutter closing time
             # without binning, ccd readout time is tops 90 ms
-            self.adw.Set_Par(15, int(math.ceil((90000+exposure_time)/(self.adw.Get_Processdelay(1)*0.025))))
+            self.adw.Set_Par(15, int(math.ceil((90000+exposure_time)/time_unit)))
             self.adw.Set_Par(11, repetitions)
         except ADwinError, e:
             print '***', e
 
         self.startAsyncMode(repetitions, exposure_time)
-
+        camObject.waitForTrigger()
+        self.noUserInterrupt = True
+        
         try:
             self.adw.Set_Par(79,1)
             self.adw.Set_Par(80,3)
-            i = 0
-            for k in range(repetitions):
-                camObject.waitForTrigger()
-                if camObject.waitForBuffer(0):
-                    camObject.image[k] = camObject.returnBuffer(0)
-                    camObject.resetEvent(0)
-                    i += 1
+            i = 0 # trigger count variable
+            max_polls = 5
+            while(i < repetitions and self.noUserInterrupt):
+                if camObject.returnBufferStatus():
+                    print "Trigger ", i+1, " received.\n"
+                    camObject.image[i] = camObject.returnBuffer(0)
+                    if (i!=repetitions-1):
+                        camObject.AddBufferToQueue(0)
+                    i += 1                  
             print "Number of triggers received: ", i
             if i != repetitions:
                 print "Error: Not all triggers received. Adjust timing!"
-            self.adw.Stop_Process(1)
-            self.adw.Start_Process(2)
+            
         except ADwinError, e:
             print '***', e
         
-        # postprocessing
-        camObject.spatialROIBackground = np.zeros(camObject.roi.getArrayRegion(camObject.image[0],camObject.img).shape[1])
-        camObject.ROIBackground = np.zeros(camObject.roi.getArrayRegion(camObject.image[0], camObject.img).shape)
-        mean = 0
-        for pic in camObject.image:
-            mean += pic
-            selected = camObject.roi.getArrayRegion(pic, camObject.img)
-            camObject.ROIBackground += selected
-        camObject.ROIBackground /= repetitions
-        mean /= repetitions
-        camObject.img.setImage(mean)
-        scipy.misc.imsave("background.png", np.transpose(mean))
-        camObject.spatialROIBackground = camObject.ROIBackground.sum(axis=1)
-        np.savetxt("roi_background.csv", np.transpose(np.array((np.arange(camObject.spatialROIBackground.size) +1 , camObject.spatialROIBackground))), delimiter="\t")
-##        if (self.fiberLaserOn.isChecked()):
-##            print "ROI Background counts w dipole laser: ", np.sum(camObject.ROIBackground)
-##        else:
-##            print "ROI Background counts: ", np.sum(camObject.ROIBackground)
-       
-        self.startVideo()   
         
-            
+        # average over all taken images
+        if self.switchOpticalTrap.isChecked():
+            self.Background_IRScatt = np.mean(camObject.image, axis=0)
+            self.img.setImage(self.Background_IRScatt)
+            print "Background counts in ROI: ", np.sum(self.Background_IRScatt), "\n"
+        else:
+            self.Background = np.mean(camObject.image, axis=0)
+            self.img.setImage(self.Background)
+            print "Background counts in ROI: ", np.sum(self.Background), "\n"
+        
+        
 
     def startReleaseRecapture(self):
         self.stopVideo()
-        global time_unit
-        print "ADwin time unit: ", time_unit
+        global time_unit                
+        ####################################################################
+                
+        repetitions = 1
+        
+        ## times in ADWin units
+        tmin = self.flightTimeInitial.value()/time_unit
+        tmax = self.flightTimeFinal.value()/time_unit
+        tstep = self.flightTimeSteps.value()/time_unit
+        t = tmin
+        if(self.fixedFlightTimeCheck.isChecked()):
+            t = tmax        
+        
+        if self.fixedFlightTimeCheck.isChecked():
+            counts_plot = pg.plot(title="Fluorescence counts")
+            profile_plot = pg.plot(title="Cloud profile")
+        
+            noofpoints = np.arange(self.averageSample.value())
+            sigmas = np.zeros(self.averageSample.value())
+            #sigmas_curve = expansion_plot.plot(noofpoints, sigmas)
+                        
+            counts = np.zeros(self.averageSample.value())
+            counts_curve = counts_plot.plot(noofpoints, counts)
+            
+        else:
+            #### plotting data during measurement ################
+            expansion_plot = pg.plot(title="Cloud extension")
+            counts_plot = pg.plot(title="Fluorescence counts")
+        
+            flightTimes = np.arange(tmin, tmax+tstep,tstep)
+            sigmas = np.zeros(flightTimes.shape)
+
+            sigmas_curve = expansion_plot.plot(flightTimes, sigmas)
+            errors = np.zeros(flightTimes.shape)
+
+            counts = np.zeros(flightTimes.shape)
+            counts_curve = counts_plot.plot(flightTimes, counts)
+            
+            repetitions = np.shape(flightTimes)[0]         
+        
         try:
-            self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+            #self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
             self.adw.Stop_Process(2)
             self.adw.Start_Process(1)
+            
+            self.adw.Set_Par(38, int(self.fixedFlightTimeCheck.isChecked()))
             # read in all necessary values            
             self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit))) # shutter delay of 700 ms
             self.adw.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit))) # kniel time delay
             print "Kniel delay time [ADwin time units]:", int(math.ceil(self.knielDelayTime.value()/time_unit))
-            self.adw.Set_Par(13, int(self.loadingTime.value()/time_unit))
             self.adw.Set_Par(15, int(math.ceil((self.readOutDelay.value()+self.rel_recap_exp_time.value())/time_unit))) # exposure and readout
-            self.adw.Set_Par(29, int(self.molasseCoolTime.value()/time_unit))
-            self.adw.Set_Par(25, int(self.rel_recap_exp_time.value()/time_unit)) # exposure time         
-
-            #### variables for frequency, MOT beam intensity and MOT coil current ramps #####
-
-            ##### frequency ramp ######
-
-            # voltstep per ADwin time unit, so that detuning is not changed by more than 0.007 V / 탎
-            voltstep = 0.007/self.rampingSpeed.value()*time_unit
-            # ramptime = number of voltsteps (per ADwin time unit)
-            ramp_time = max(int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning.value())/voltstep)),1)
-            # setting the ramping time in ADWin time units
-            self.adw.Set_Par(16, ramp_time)
-            # setting the volt step per ADwin time unit for frequency ramp
-            self.adw.Set_FPar(25, voltstep)
-
-            ##### MOT beam intensity ramp #####
-
-            if (ramp_time != 0):      
-                # volt step for cooler power
-                self.adw.Set_FPar(28, (self.vcaCooler.value()-self.vcaCoolerTarget.value())/ramp_time)
-                # volt step for repump power
-                self.adw.Set_FPar(29, (self.vcaRepumper.value() - self.vcaRepumperTarget.value())/ramp_time)
-
-            ####################################
             
-
-            ##### MOT coil current ramp #####
-            self.adw.Set_FPar(39, self.maxMOTCurrent.value())
-            if (ramp_time != 0):
-                # setting volt step for current ramp
-                self.adw.Set_FPar(33, (self.maxMOTCurrent.value() - self.motCoilCurrent.value())/ramp_time)
-                       
-           
+            self.adw.Set_Par(25, int(math.ceil(self.rel_recap_exp_time.value()/time_unit))) # exposure time
+            # recool time
+            self.adw.Set_Par(48, int(math.ceil(self.recoolTimeReleaseRecapture.value()/time_unit)))
+        
+            #### variables for frequency, MOT beam intensity and MOT coil current ramps ###
+            self.adw.Set_FPar(12, self.vcoBeatOffset.value()) # actual detuning
             self.adw.Set_FPar(11, self.vcoBeatOffset.value()) #initial detuning
-            self.adw.Set_FPar(13, self.targetDetuning.value()) #final detuning
             self.adw.Set_FPar(17, self.vcaCooler.value()) # initial cooler power
             self.adw.Set_FPar(18, self.vcaRepumper.value()) # initial repumper power
             self.adw.Set_FPar(37, self.motCoilCurrent.value()) # initial MOT current
-
-            self.adw.Set_FPar(15, self.vcaCoolerTarget.value()) # low saturation cooler power
-            self.adw.Set_FPar(16, self.vcaRepumperTarget.value()) # low saturation repump power
             self.adw.Set_FPar(34, self.vcaCooler.value())# current cooler power
             self.adw.Set_FPar(35, self.vcaRepumper.value()) # current repumper power
             self.adw.Set_FPar(36, self.motCoilCurrent.value()) # actual MOT current
             
             self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value())
             self.adw.Set_FPar(20, self.RFdriveramp.value())
+            
+            self.adw.Set_Par(11, repetitions)
+            
         except ADwinError, e:
             print '***', e
-
-        #create filename
+        
+        #####################################################################
+        ########## save experimental parameters 
         today = time.strftime("%d%m")+time.strftime("%Y")[2:]
         directory = "Y:/Experimental Control/Python Experimental Control/Measurements/Temperature/"+today
         directory2 = directory + time.strftime("/%Hh_%Mm")
@@ -764,11 +1140,9 @@ class MainGUIThread(QtGui.QMainWindow):
         exp_params = open(directory2+"/gui_parameter.txt", "w")
         exp_params.write("PROCESSDELAY = " + str(self.adw.Get_Processdelay(1)) + "\n")
         exp_params.write("All ADwin times in units of PROCESSDELAY!\n")
-        exp_params.write("Number of repetitions: " + str(self.repetitions.value()) + "\n")
         exp_params.write("Min flight time: " + str(self.flightTimeInitial.value()) + "\n")
         exp_params.write("Max flight time: " + str(self.flightTimeFinal.value()) + "\n")
         exp_params.write("Time of flight steps: " + str(self.flightTimeSteps.value()) + "\n")
-        exp_params.write("Loading time: " + str(self.loadingTime.value())+ "\n")
         exp_params.write("Load Detuning [V]: " + str(self.vcoBeatOffset.value())+"\n")
         exp_params.write("Detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.vcoBeatOffset.value())/6.0)+"\n")
         exp_params.write("Target detuning [V]: " + str(self.targetDetuning.value()) + "\n")
@@ -779,132 +1153,112 @@ class MainGUIThread(QtGui.QMainWindow):
         exp_params.write("Molasse cool time: " + str(self.molasseCoolTime.value())+"\n")
         exp_params.write("Exposure time [mus]: " + str(self.rel_recap_exp_time.value())+"\n")
         exp_params.close()
-
-        # times in ADWin units
-        tmin = self.flightTimeInitial.value()/time_unit
-        tmax = self.flightTimeFinal.value()/time_unit
-        tstep = self.flightTimeSteps.value()/time_unit
-
-        #### plotting data during measurement ################
-
-        expansion_plot = pg.plot(title="Cloud extension")
-        counts_plot = pg.plot(title="Fluorescence counts")
-    
-        if self.fixedFlightTimeCheck.isChecked():
-            noofpoints = np.arange(self.averageSample.value())
-            sigmas = np.zeros(self.averageSample.value())
-            sigmas_curve = expansion_plot.plot(noofpoints, sigmas)
+        ####
+               
             
-            counts = np.zeros(self.averageSample.value())
-            counts_curve = counts_plot.plot(noofpoints, counts)
+        #prepare fluorescence camera
+        self.startAsyncMode(repetitions, self.rel_recap_exp_time.value())
+        camObject.waitForTrigger()
 
-            profile_plot = pg.plot(title="Cloud profile")
-        else:
-                        
-            flightTimes = np.arange(tmin, tmax+tstep,tstep)
-            sigmas = np.zeros(flightTimes.shape)
-
-            sigmas_curve = expansion_plot.plot(flightTimes, sigmas)
-            errors = np.zeros(flightTimes.shape)
-
-            counts = np.zeros(flightTimes.shape)
-            counts_curve = counts_plot.plot(flightTimes, counts)
-        
-            
-
-        self.startAsyncMode(self.repetitions.value(), self.rel_recap_exp_time.value())
-
-        j = 0
         fitgood = True
         firstIteration = True
         abs_max, abs_min = 0,0
 
-        #### start of measurement loop #####
-
-        t = tmin
-        if(self.fixedFlightTimeCheck.isChecked()):
-            t = tmax
-                
-        while t <= tmax:
-            
+        # ######configuration of Kniel sequence ############################
+        # # switch off power supply in order to change control mode (done, since Par_80 = 0)
+        # # switch to sequence, remote, so that sequences can be modified
+        # energy3000.setModes(3,1) 
+        # # step 1: 60 A for (2* shutter_delay + loading_time - ramp_time)
+        # # step 2: 120 A for (molassecooltime + time_of_flight + time_of_exposure)
+        # # step 3: 60 A for readout_time
+        # current_seq = {0:{'TIME':2*self.ovenShutterDelay.value()*1E-6+self.loadingTime.value()*1E-6-\
+        # ramp_time*time_unit*1E-6, 'SV':35, 'SC':60,'SP':3060, \
+        # 'BANK':10, 'TYPE':0, 'MODE':0}, 1:{'TIME':self.molasseCoolTime.value()*1E-6 + (ramp_time+t)*time_unit*1E-6+self.readOutDelay.value()*1E-6-0.01, 'SV':35, \
+        # 'SC':self.maxMOTCurrent.value(),'SP':3060, 'BANK':11, 'TYPE':0, 'MODE':0},\
+        # 2:{'TIME':0.01, 'SV':35, 'SC':60,'SP':3060, 'BANK':12, \
+           # 'TYPE':0, 'MODE':0}}
+        # if (self.reloadKniel.isChecked()):
+            # energy3000.writeSequence(current_seq, self.repetitions.value())
+            # self.knielTable.updateTable()
+        # # switch to sequence, local, so that sequences can be triggered
+        # energy3000.setModes(3,0)
+        
+        self.noUserInterrupt = True
+        self.waitForParamChange = False
+        i = 0 # trigger count variable
+        max_polls = 5
+        
+        while t<= tmax and self.noUserInterrupt:
+            # wait until a parameter is changed for the next release
+            # if the flight time is fixed
+            while(self.fixedFlightTimeCheck.isChecked() and self.waitForParamChange and self.noUserInterrupt):
+                pg.QtGui.QApplication.processEvents()
+                time.sleep(0.1)
             try:
-                i = 0 # trigger count variable
-                self.adw.Set_FPar(12, self.vcoBeatOffset.value()) # actual detuning
-                self.adw.Set_Par(11, int(self.repetitions.value()))
-                self.adw.Set_Par(14, int(t)) # flight time
-                print "Release time t (ADwin unit): ", self.adw.Get_Par(14)
-
-
-                ######configuration of Kniel sequence ############################
-                # switch off power supply in order to change control mode (done, since Par_80 = 0)
-                energy3000.setModes(3,1) # sequence, remote
-                # step 1: 60 A for (2* shutter_delay + loading_time - ramp_time)
-                # step 2: 120 A for (molassecooltime + time_of_flight + time_of_exposure)
-                # step 3: 60 A for readout_time
-                current_seq = {0:{'TIME':2*self.ovenShutterDelay.value()*1E-6+self.loadingTime.value()*1E-6-\
-                ramp_time*time_unit*1E-6, 'SV':35, 'SC':60,'SP':3060, \
-                'BANK':10, 'TYPE':0, 'MODE':0}, 1:{'TIME':self.molasseCoolTime.value()*1E-6 + (ramp_time+t)*time_unit*1E-6+self.readOutDelay.value()*1E-6-0.01, 'SV':35, \
-                'SC':self.maxMOTCurrent.value(),'SP':3060, 'BANK':11, 'TYPE':0, 'MODE':0},\
-                2:{'TIME':0.01, 'SV':35, 'SC':60,'SP':3060, 'BANK':12, \
-                   'TYPE':0, 'MODE':0}}
-                if (self.reloadKniel.isChecked()):
-                    energy3000.writeSequence(current_seq, self.repetitions.value())
-                    self.knielTable.updateTable()
-                energy3000.setModes(3,0) # sequence, local
-
-                self.adw.Set_Par(79, 1) # to initialize variables of the ADwin section
+                if (self.fixedFlightTimeCheck.isChecked()):
+                    # change of molasse cool time
+                    self.adw.Set_Par(29, int(math.ceil(self.molasseCoolTime.value()/time_unit)))
+                    ##### frequency ramp ######
+                    # voltstep per ADwin time unit, so that detuning is not changed by more than 0.007 V / 탎
+                    voltstep = 0.007/self.rampingSpeed.value()*time_unit
+                    # ramptime = number of voltsteps (per ADwin time unit)
+                    ramp_time = max(int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning.value())/voltstep)),1)
+                    # setting the ramping time in ADWin time units
+                    self.adw.Set_Par(16, ramp_time)
+                    # setting the volt step per ADwin time unit for frequency ramp
+                    self.adw.Set_FPar(25, voltstep)
+                    ##### MOT coil current ramp #####
+                    self.adw.Set_FPar(39, self.maxMOTCurrent.value())
+                    if (ramp_time != 0):
+                        # setting volt step for current ramp
+                        self.adw.Set_FPar(33, (self.maxMOTCurrent.value() - self.motCoilCurrent.value())/ramp_time)
+                    ##### MOT beam intensity ramp #####
+                    if (ramp_time != 0):      
+                        # volt step for cooler power
+                        self.adw.Set_FPar(28, abs((self.vcaCooler.value()-self.vcaCoolerTarget.value())/ramp_time))
+                        # volt step for repump power
+                        self.adw.Set_FPar(29, (self.vcaRepumper.value() - self.vcaRepumperTarget.value())/ramp_time)
+                    self.adw.Set_FPar(13, self.targetDetuning.value()) #final detuning
+                    self.adw.Set_FPar(15, self.vcaCoolerTarget.value()) # low saturation cooler power
+                    self.adw.Set_FPar(16, self.vcaRepumperTarget.value()) # low saturation repump power
+            ####################################
+                else:
+                    self.adw.Set_Par(14, int(t)) # flight time
+                print "Release time t (ADwin unit): ", t
+                # start and initialize ADwin sequence
+                self.adw.Set_Par(79, 1) 
                 self.adw.Set_Par(80, 2)
-                sum_img = 0
-                while(i<self.repetitions.value()):
-                    camObject.waitForTrigger()
-                    if camObject.waitForBuffer(0):
-                        camObject.image[i] = camObject.returnBuffer(0)
-                        camObject.resetEvent(0)
-                        sum_img += camObject.image[i]
-                        camObject.img.setImage(sum_img)
-                        i += 1
-                    if self.adw.Get_Par(78) == 1: #in case, sequence has to be interrupted
-                        self.adw.Set_Par(78,0)
-                        self.adw.Set_Par(80,0)
-                        energy3000.setModes(2,1) # lab, remote
-                        energy3000.setActiveBank(10)
-                        energy3000.setModes(2,0) # lab, local
-                        self.adw.Stop_Process(1)
-                        self.adw.Start_Process(2)                        
-                        if(self.motCurrentTTL.isChecked()):
-                            self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b00000100000)
-                        self.startVideo()
-                        return
-                    pg.QtGui.QApplication.processEvents()
-                    # stop sequence in case not all triggers were received
-                print "Number of triggers received: ", i
-                if i != self.repetitions.value():
-                    print "Error: Not all triggers received. Adjust timing!"
-                    self.adw.Set_Par(80,0)
-                    self.adw.Stop_Process(1)
-                    self.adw.Start_Process(2)
-                    self.startVideo()
             except ADwinError, e:
                 print '***', e
-
+                
+            k = 0
+            while (not(camObject.waitForBuffer()) and k < max_polls):
+                k += 1
+                pass
+            if camObject.returnBufferStatus():
+                camObject.image[i] = camObject.returnBuffer(0)
+                if (t<=tmax):
+                    camObject.AddBufferToQueue(0)
+            
+                
+            self.img.setImage(camObject.image[i])
+            
+            if (self.fixedFlightTimeCheck.isChecked()):
+                self.waitForParamChange = True
+            
+            #####################################################            
             # postprocessing of taken images
-
             # the first array contains the cloud profile in vertical direction
             # the second array contains its absolute standard deviations
             # third array contains cloud profile in horizontal direction
             # fourth array contains its absolute standard deviations
-            afterExpansion = np.zeros((2,camObject.spatialROIBackground.size))
-            sum_img = 0
-            
-            for k in range(self.repetitions.value()):
-                img = camObject.roi.getArrayRegion(camObject.image[k], camObject.img) - camObject.ROIBackground
-                sum_img += img
-            
-            afterExpansion[0] += sum_img.sum(axis=1)
+            afterExpansion = np.zeros((2,self.spatialROIBackground.size))
+            sum_img = 0            
+            img = self.roi.getArrayRegion(camObject.image[i], self.img) - self.ROIBackground
+            sum_img += img
+            afterExpansion[0] += sum_img.sum(axis=self.roiProfilePlot.currentIndex())
             afterExpansion[1] += np.sqrt(np.fabs(afterExpansion[0]))
-            #afterExpansion[2] += sum_img.sum(axis=0)
-            #afterExpansion[3] += np.sqrt(np.fabs(afterExpansion[3]))
-
+           
             maxarg_row = np.argmax(afterExpansion[0])
             maxarg_col = np.argmax(sum_img.sum(axis=0))
             minarg_row = np.argmin(afterExpansion[0])
@@ -916,27 +1270,9 @@ class MainGUIThread(QtGui.QMainWindow):
             if((vbinned_max-vbinned_min)>=1):
                 afterExpansion[0] = (afterExpansion[0]-vbinned_min)/(vbinned_max-vbinned_min)
                 afterExpansion[1] = (afterExpansion[1])/(vbinned_max-vbinned_min)
-
-            if(not(self.fixedFlightTimeCheck.isChecked())):
-                #create a color map for the taken image and save image as png
-                if firstIteration:
-                    abs_max = sum_img[maxarg_row][maxarg_col]
-                    abs_min = sum_img[minarg_row][minarg_col]
-                    firstIteration = False
-                red = np.array(sum_img)
-                red[red < 0.8*(abs_max-abs_min)+abs_min] = 0.0
-                blue = np.array(sum_img)
-                blue[blue > 0.4*(abs_max-abs_min)+abs_min] = 0.0
-                green = np.array(sum_img)
-                green[(green <= 0.4*(abs_max-abs_min)+abs_min) | \
-                      (green >= 0.8*(abs_max-abs_min)+abs_min)] = 0.0
-                rgb = np.array((red,green,blue))                
-                scipy.misc.imsave(directory2 + "/cloud_after_"+\
-                                  str(t*self.adw.Get_Processdelay(1)*0.025)\
-                                  + "mus_expansion.png", np.transpose(rgb))
-
-            xtmp = np.arange(camObject.spatialROIBackground.size) + 1
-
+                                  
+            xtmp = np.arange(self.spatialROIBackground.size) + 1
+            
             # fit parameters for profile in horizontal ROI direction
             try:
                 params = optimization.curve_fit(gaussian, xtmp, afterExpansion[0], p0 = [maxarg_row, 1, 1, 0], sigma=afterExpansion[1], absolute_sigma=True)
@@ -954,55 +1290,74 @@ class MainGUIThread(QtGui.QMainWindow):
             if fitgood:
                 fittedpoints = skewWithBackground(xtmp, *tuple(params3[0]))
                 if not(self.fixedFlightTimeCheck.isChecked()):
-                    np.savetxt(directory2 +"/mot_profile_expansion_" + str(t*self.adw.Get_Processdelay(1)*0.025) + "mus.csv", np.transpose(np.array((xtmp, afterExpansion[0], afterExpansion[1], fittedpoints))), delimiter="\t")
+                    np.savetxt(directory2 +"/mot_profile_expansion_" + str(t*time_unit) + "mus.csv", np.transpose(np.array((xtmp, afterExpansion[0], afterExpansion[1], fittedpoints))), delimiter="\t")
                 ##save profile plot + fit to png file
                     self.ax.errorbar(xtmp, afterExpansion[0], afterExpansion[1])
                     self.ax.errorbar(xtmp, fittedpoints)
-                    plt.savefig(directory2 +"/mot_profile_expansion_" + str(t*self.adw.Get_Processdelay(1)*0.025) + "mus.png", bbox_inches='tight') 
+                    plt.savefig(directory2 +"/mot_profile_expansion_" + str(t*time_unit) + "mus.png", bbox_inches='tight') 
                     self.ax.clear()
                 if self.fixedFlightTimeCheck.isChecked():
                     counts[-1] = np.sum(sum_img)
-                    counts = np.roll(counts,-1)
+                    counts = np.roll(counts,-1)                   
                     sigmas[-1] = params3[0][1]
                     sigmas = np.roll(sigmas,-1)
                 else:
-                    counts[j] = np.sum(sum_img)
+                    counts[i] = np.sum(sum_img)
                     # save variance and its fit error
-                    sigmas[j] += params3[0][1]
-                    errors[j] += np.sqrt(np.fabs(params3[1][1,1]))
+                    sigmas[i] += params3[0][1]
+                    errors[i] += np.sqrt(np.fabs(params3[1][1,1]))
             else:
                 if not(self.fixedFlightTimeCheck.isChecked()):
                     np.savetxt(directory2 +"/mot_profile_expansion_" + \
-                               str(t*self.adw.Get_Processdelay(1)*0.025) \
+                               str(t*time_unit) \
                                + "mus.csv", np.transpose(np.array((xtmp, afterExpansion[0], afterExpansion[1]))), delimiter="\t")
                 fitgood = True
-                
-            j += 1
-            
-            pg.QtGui.QApplication.processEvents()
+                                       
             if(self.fixedFlightTimeCheck.isChecked()):
                 counts_curve.setData(noofpoints, counts)
-                sigmas_curve.setData(noofpoints, sigmas)
+                #sigmas_curve.setData(noofpoints, sigmas)
                 profile_plot.plot(xtmp, afterExpansion[0], clear=True)
+                self.curve.setData(noofpoints, sigmas)
             else:
                 counts_curve.setData(flightTimes, counts)
                 sigmas_curve.setData(flightTimes, sigmas)
-                t += tstep                
-
-            #### end of measurement loop #####
+                i += 1
+                t += tstep
+            
+            pg.QtGui.QApplication.processEvents()
+            
+        if not(self.fixedFlightTimeCheck.isChecked()):
+            print "Number of triggers received: ", i
+            if i < repetitions-1:
+                print "Error: Not all triggers received. Adjust timing!"
+                return
+            
+        # # switch to sequence, remote, so that sequences can be modified
+        # energy3000.setModes(3,1) 
+        # # step 1: 60 A for (2* shutter_delay + loading_time - ramp_time)
+        # # step 2: 120 A for (molassecooltime + time_of_flight + time_of_exposure)
+        # # step 3: 60 A for readout_time
+        # current_seq = {0:{'TIME':2*self.ovenShutterDelay.value()*1E-6+self.loadingTime.value()*1E-6-\
+        # ramp_time*time_unit*1E-6, 'SV':35, 'SC':60,'SP':3060, \
+        # 'BANK':10, 'TYPE':0, 'MODE':0}, 1:{'TIME':self.molasseCoolTime.value()*1E-6 + (ramp_time+t)*time_unit*1E-6+self.readOutDelay.value()*1E-6-0.01, 'SV':35, \
+        # 'SC':self.maxMOTCurrent.value(),'SP':3060, 'BANK':11, 'TYPE':0, 'MODE':0},\
+        # 2:{'TIME':0.01, 'SV':35, 'SC':60,'SP':3060, 'BANK':12, \
+           # 'TYPE':0, 'MODE':0}}
+        # if (self.reloadKniel.isChecked()):
+            # energy3000.writeSequence(current_seq, self.repetitions.value())
+            # self.knielTable.updateTable()
+        # # switch to sequence, local, so that sequences can be triggered
+        # energy3000.setModes(3,0)
             
         try:
-            self.adw.Stop_Process(1)
-            self.adw.Start_Process(2)
             # save analog timing graph
             self.writeAnalogTimingGraph([9,6,7,8,12,10,11,13], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Beat VCO [V]\t MOT current [V]\t Dipole power [V]\t RF driver [V]\t Cam TTL [V]")  
-            self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
-            energy3000.setModes(2,1) # lab, remote
-            energy3000.setActiveBank(10)            
-            energy3000.setModes(2,0) # lab, local
-            if(self.motCurrentTTL.isChecked()):
-                self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b00000100000)
-                                                                                                                                                                      
+            # self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+            # energy3000.setModes(2,1) # lab, remote
+            # energy3000.setActiveBank(10)            
+            # energy3000.setModes(2,0) # lab, local
+            # if(self.motCurrentTTL.isChecked()):
+                # self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b00000100000)
         except ADwinError, e:
             print '***', e
 
@@ -1015,17 +1370,17 @@ class MainGUIThread(QtGui.QMainWindow):
                 # 1 px = 0.04 mm
                 # after conversion times are in ms, variances of cloud in mm^2
                 # fit constant of quadratic function should be mm^2/ms^2 = m^2/s^2
-                params = optimization.curve_fit(quadratic, self.adw.Get_Processdelay(1)*0.000025*flightTimes, 0.0016*sigmas, p0=[np.min(0.0016*sigmas),1],sigma=0.0016*errors)
-                fittedpoints = quadratic(self.adw.Get_Processdelay(1)*0.000025*flightTimes, *tuple(params[0]))
-                np.savetxt(outfile, np.transpose(np.array((self.adw.Get_Processdelay(1)*0.000025*flightTimes, 0.0016*sigmas, 0.0016*errors, fittedpoints))), delimiter="\t")
+                params = optimization.curve_fit(quadratic, time_unit*0.001*flightTimes, 0.0016*sigmas, p0=[np.min(0.0016*sigmas),1],sigma=0.0016*errors)
+                fittedpoints = quadratic(time_unit*0.001*flightTimes, *tuple(params[0]))
+                np.savetxt(outfile, np.transpose(np.array((time_unit*0.001*flightTimes, 0.0016*sigmas, 0.0016*errors, fittedpoints))), delimiter="\t")
                 print "Temperature = ", 0.722*params[0][1], " +/- ", 0.722*params[1][1][1], " mK."
                 if (errors[-1]/errors[0] < 100):#only plot error bars, if they don't get to big for larger expansion times
-                    self.ax.errorbar(self.adw.Get_Processdelay(1)*0.000025*flightTimes, 0.0016*sigmas, 0.0016*errors,label='Data')
+                    self.ax.errorbar(time_unit*0.001*flightTimes, 0.0016*sigmas, 0.0016*errors,label='Data')
                     self.ax.set_title("T = " + str(0.722*params[0][1]) + " +/- " + str(0.722*params[1][1][1]) + " mK")
                 else:
-                    self.ax.errorbar(self.adw.Get_Processdelay(1)*0.000025*flightTimes, 0.0016*sigmas, label='Data')
+                    self.ax.errorbar(time_unit*0.001*flightTimes, 0.0016*sigmas, label='Data')
                     self.ax.set_title("T = " + str(0.722*params[0][1]) + " +/- " + str(0.722*params[1][1][1]) + " mK (errorbars not shown)")
-                self.ax.errorbar(self.adw.Get_Processdelay(1)*0.000025*flightTimes, fittedpoints, label='Quadratic fit')
+                self.ax.errorbar(time_unit*0.001*flightTimes, fittedpoints, label='Quadratic fit')
                 
                 self.ax.set_xlabel('Flight time (ms)')
                 self.ax.set_ylabel('Cloud variance (mm^2)')
@@ -1033,88 +1388,517 @@ class MainGUIThread(QtGui.QMainWindow):
                 plt.savefig(directory2 + "/cloud_expansion.png")
                 self.ax.clear()
             except RuntimeError:
-                print "Data could not be fitted."
+                print "Data could not be fitted."#
     
-        self.startVideo()
+    def ionizeFromMOT(self):
+        self.stopVideo()
+        # preparing the power supply for sequence mode
+        self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b0111111111111) # switch off pwr supply
+        energy3000.setModes(3,0) # sequence, local  
+        self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b1000000000000) # switch on pwr supply
+        #prepare fluorescence camera
+        repetitions = 1
+        self.startAsyncMode(repetitions, self.exposure_time_2.value())
+        camObject.waitForTrigger()
 
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/ReactionMicroscopeData/IonSpectraForMOT/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        
+        if not os.path.exists(directory):
+            try:
+                os.makedirs(directory)
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
+        if not os.path.exists(directory2):
+            try:
+                os.makedirs(directory2)
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
+            
+        exp_params = open(directory2+"/parameters.txt", "w")
+        exp_params.write("Loading time: " + str(self.motLoadingTime.value())+ "탎 \n")
+        exp_params.write("Ionizing time: " + str(self.ionizingTime.value())+"탎 \n")
+        exp_params.write("Target detuning [V]: " + str(self.targetDetuning_3.value()) + "\n")
+        exp_params.write("Target detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.targetDetuning_2.value())/6.0)+"\n")
+        exp_params.write("Frequency ramp rate [탎/0.007 V]: " + str(self.rampingSpeed_3.value())+"\n")
+        exp_params.write("Exposure time [mus]: " + str(self.exposure_time_2.value())+"\n")
+        exp_params.write("Cooling time [mus]: "+str(self.coolingTimeAtTargetDetuning.value())+"\n")
+        exp_params.write("Pushing beam on: "+str(self.pushingBeam.isChecked())+"\n")
+        exp_params.write("Pushing beam time [mus]: "+str(self.pushingBeamTime.value())+"\n")
+        exp_params.write("VCA Cooler Target: "+ str(self.vcaCoolerTarget_3.value())+"\n")
+        exp_params.write("VCA Repumper Target: "+ str(self.vcaRepumperTarget_3.value())+"\n")
+        exp_params.close()
+        
+        global time_unit, time_unit2
+        try:
+            # stop slow sequence and start fast sequence on both ADwins
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
+            self.adw.Stop_Process(2)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)
+            # time for reloading the MOT
+            self.adw.Set_Par(13, int(math.ceil(self.motLoadingTime.value()/time_unit)))
+            self.adwPro2.Set_Par(13, int(math.ceil(self.motLoadingTime.value()/time_unit2)))
+            # response time of femto shutter
+            self.adw.Set_Par(56, int(math.ceil(self.femtoShutterDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(56, int(math.ceil(self.femtoShutterDelay.value()/time_unit2)))
+            
+            self.adw.Set_Par(52, int(self.fsSync.isChecked()))
+            # ramps
+            # time for ramp
+            deltaT = self.rampTime.value() # time in mus
+            self.adw.Set_Par(16, int(math.ceil(deltaT/time_unit)))
+            self.adwPro2.Set_Par(16, int(math.ceil(deltaT/time_unit2)))
+            self.adw.Set_Par(50, int(2*math.ceil(deltaT/time_unit))) # make back freq time a bit longer, just to be on safe side
+            self.adwPro2.Set_Par(50, int(2*math.ceil(deltaT/time_unit2)))
+            # frequency ramp
+            # calculate voltage step
+            deltaU = np.abs(self.vcoBeatOffset.value()-self.targetDetuning_3.value())/self.rampTime.value()*time_unit
+            # write voltage increment VCO control voltage into FPar_25 = rampvoltstep
+            self.adw.Set_FPar(25, deltaU)
+            # MOT beam intensity ramp
+            # cooler volt step
+            deltaU = np.abs((self.vcaCooler.value()-self.vcaCoolerTarget_3.value()))/self.rampTime.value()*time_unit
+            # write voltage increment for Cooler VCA control voltage into FPar_28 = rampvolstep_cool
+            self.adw.Set_FPar(28, deltaU)
+            # repumper volt step
+            deltaU = np.abs(self.vcaRepumper.value()-self.vcaRepumperTarget_3.value())/self.rampTime.value()*time_unit
+            # write voltage increment for Cooler VCA control voltage into FPar_28 = rampvolstep_cool
+            self.adw.Set_FPar(29, deltaU)                
+                        
+            self.adw.Set_FPar(12, self.vcoBeatOffset.value())
+            self.adw.Set_FPar(15, self.vcaCoolerTarget_3.value())
+            self.adw.Set_FPar(16, self.vcaRepumperTarget_3.value())
+            
+            # exposure time
+            self.adw.Set_Par(25, int(math.ceil(self.exposure_time_2.value()/time_unit)))
+            self.adwPro2.Set_Par(25, int(math.ceil(self.exposure_time_2.value()/time_unit2)))
+            # readout time pixelfly qe
+            self.adw.Set_Par(15, int(math.ceil(self.readOutDelay.value()/time_unit)))
+            # ionization time
+            self.adw.Set_Par(55, int(math.ceil(self.ionizingTime.value()/time_unit)))
+            self.adwPro2.Set_Par(55, int(math.ceil(self.ionizingTime.value()/time_unit2)))
+            # initial cooler power
+            self.adw.Set_FPar(17, self.vcaCooler.value())
+            # initial repumper power
+            self.adw.Set_FPar(18, self.vcaRepumper.value())
+            # initial detuning
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            # write final detuning to ADWin
+            self.adw.Set_FPar(13, self.targetDetuning_3.value())
+            # initial dipole laser control voltage
+            self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value())
+            # initial rf driver control voltage
+            self.adw.Set_FPar(20, self.RFdriveramp.value())
+            # use mag gradient in ramp or not
+            self.adw.Set_Par(58, int(self.compressWithMagGrad.isChecked()))
+            # delay for switching off the current of the MOT coils
+            self.adw.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit)))
+            # pushing Beam On or Not
+            self.adw.Set_Par(59, int(self.pushingBeam.isChecked()))
+            self.adwPro2.Set_Par(59, int(self.pushingBeam.isChecked()))
+            if (self.pushingBeam.isChecked()):
+                self.adw.Set_Par(21, int(math.ceil(self.pushingBeamTime.value()/time_unit)))
+                self.adwPro2.Set_Par(21, int(math.ceil(self.pushingBeamTime.value()/time_unit2)))
+            else:
+                self.adw.Set_Par(21, int(math.ceil(self.coolingTimeAtTargetDetuning.value()/time_unit)))
+                self.adwPro2.Set_Par(21, int(math.ceil(self.coolingTimeAtTargetDetuning.value()/time_unit2)))
+            # slower beam on or not after loading
+            self.adw.Set_Par(23, int(not(self.slowerBeamOff.isChecked())))
+            # switch on optical trap during mot loading phase
+            self.adw.Set_Par(20, int(self.loadDipoleTrap.isChecked()))
+            # switch on PA Beam during cooling phase
+            self.adwPro2.Set_Par(54, int(self.PABeamOn.isChecked()))
+            self.adwPro2.Set_Par(60, int(math.ceil(self.uniblitzDelay.value()/time_unit2)))
+            # change detuning after PA beam exposure to push away atoms
+            self.adw.Set_Par(61, int(self.pushAwayDetuning.isChecked()))
+            self.adw.Set_FPar(61, self.pushAwayDetuningValue.value())
+            
+        except ADwinError, e:
+            print '***', e
+        self.noUserInterrupt = True       
+        j = 0
+
+        self.ROI_profile_before_ver = 0
+        self.ROI_profile_before_hor = 0
+        self.ROI_profile_ver = 0
+        self.ROI_profile_hor = 0
+        self.ROI_profile_ver_old = 0
+        self.ROI_profile_hor_old = 0
+        self.ROI_profile_ver_M = 0
+        self.ROI_profile_hor_M = 0
+        self.ROI_profile_ver_M_old = 0
+        self.ROI_profile_hor_M_old = 0
+        self.ROI_profile_var = 0
+        try:
+            # logging
+            self.adw.Set_Par(77,1)
+            # initialize 
+            self.adw.Set_Par(79, 1)
+            self.adwPro2.Set_Par(79,1)
+            # start case 4, but start it on ADWin Pro II first, because the sequence already runs and is triggering.
+            self.adwPro2.Set_Par(80,6)
+            self.adw.Set_Par(80, 6)
+            # since process 1 on ADWIN Gold needs an external trigger, start this process first
+            self.adw.Start_Process(1)
+            # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+            self.adwPro2.Start_Process(1)
+        except ADwinError, e:
+            print '***', e
+        while(self.noUserInterrupt):
+            trigger = 0
+            while ((trigger < 2) and self.noUserInterrupt):
+                pg.QtGui.QApplication.processEvents()
+                if camObject.waitForBuffer(0):
+                    trigger += 1
+                    camObject.image[0] = camObject.returnBuffer(0)
+                    camObject.AddBufferToQueue(0)
+                    ROI = self.roi.getArrayRegion(camObject.image[0], self.img)
+                    tmp_ver = ROI.sum(axis=0)
+                    tmp_hor = ROI.sum(axis=1)
+                    if (trigger == 1):
+                        print("First trigger received.\n")
+                        self.ROI_profile_before_ver = self.ROI_profile_before_ver*j/(j+1)+tmp_ver/(j+1)
+                        self.ROI_profile_before_hor = self.ROI_profile_before_hor*j/(j+1)+tmp_hor/(j+1)
+                    if (trigger == 2):
+                        print("Second trigger received.\n")
+                        j+=1
+                        self.img.setImage(camObject.image[0])
+                        if (self.roiProfilePlot.currentIndex() == 0):
+                            self.p3.plot(tmp_ver,clear=True, pen=(1,3))
+                        elif (self.roiProfilePlot.currentIndex() == 1):
+                            self.p3.plot(tmp_hor,clear=True, pen=(1,3))
+                        # calculation of mean ROI profiles
+                        self.ROI_profile_ver_old = self.ROI_profile_ver
+                        self.ROI_profile_hor_old = self.ROI_profile_hor
+                        self.ROI_profile_ver = self.ROI_profile_ver_old*(j-1)/j + tmp_ver/j
+                        self.ROI_profile_hor = self.ROI_profile_hor_old*(j-1)/j + tmp_hor/j
+                        # calculation of their standard sample variances
+                        self.ROI_profile_ver_M = self.ROI_profile_ver_M_old + (tmp_ver-self.ROI_profile_ver_old)*(tmp_ver-self.ROI_profile_ver)
+                        self.ROI_profile_hor_M = self.ROI_profile_hor_M_old + (tmp_hor-self.ROI_profile_hor_old)*(tmp_hor-self.ROI_profile_hor)
+        if (j>=2):
+            np.savez(directory2+"/ROI_profiles_before_compression", vertProfile = self.ROI_profile_before_ver, horProfile=self.ROI_profile_before_hor)
+            np.savez(directory2+"/ROI_profiles", vertProfile = self.ROI_profile_ver, horProfile = self.ROI_profile_hor, vertProfileVar = self.ROI_profile_ver_M/(j-1), horProfileVar = self.ROI_profile_hor_M/(j-1))                        
+
+    def continuouslyLoadOpticalTrap(self):
+        self.stopVideo()
+        global time_unit, time_unit2
+        # readout time of pixelfly qe
+        readout_time = 90000
+        repetitions = 1
+        
+        try:
+            # changing operation mode of Kniel power supply to sequence
+            self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b0111111111111) # switch off pwr supply
+            energy3000.setModes(3,0) # sequence, local  
+            self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b1000000000000) # switch on pwr supply
+            
+            # stop slow sequence and start fast sequence on both ADwins
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
+            self.adw.Stop_Process(2)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)
+            
+            ##### write timings into ADWin variables #####
+            # time for loading @ load detuning and intensities
+            self.adw.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit)))
+            self.adwPro2.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit2)))
+            # time for optical pumping
+            self.adw.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit)))
+            self.adwPro2.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit2)))
+            # time for free expansion of atomic cloud
+            self.adw.Set_Par(14, int(math.ceil(self.optTrapFlightTime.value()/time_unit)))
+            self.adwPro2.Set_Par(14, int(math.ceil(self.optTrapFlightTime.value()/time_unit2)))
+            # exposure time for pixelfly qe
+            self.adw.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit)))
+            self.adwPro2.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit2)))
+            # delay until current is ramped down from 60 A to 0 A
+            self.adw.Set_Par(45, int(math.ceil(0.5*self.currentOffDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(45, int(math.ceil(0.5*self.currentOffDelay.value()/time_unit2)))
+            # time of optical trapping without quadrupole magnetic fieldSize
+            self.adw.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit)))
+            self.adwPro2.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit2)))
+            #### write some other parameters ####
+            # initial cooler power
+            self.adw.Set_FPar(17, self.vcaCooler.value())
+            # initial repumper power
+            self.adw.Set_FPar(18, self.vcaRepumper.value())
+            # initial detuning
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            # initial dipole laser control voltage
+            self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value())
+            # initial rf driver control voltage
+            self.adw.Set_FPar(20, self.RFdriveramp.value())
+            # daq or not
+            self.adw.Set_Par(51, int(self.daqEnable_2.isChecked()))
+            # roibackground or not
+            self.adw.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            # number of times, sequence is repeated
+            self.adw.Set_Par(11, repetitions)
+            self.adwPro2.Set_Par(11, repetitions)
+            
+        except ADwinError, e:
+            print '***', e
+            
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/TransferEfficiency/"+today
+        if (self.daqEnable.isChecked()):
+            directory = "Y:/ReactionMicroscopeData/IonSpectraForDipoleTrap/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        
+        if not os.path.exists(directory):
+            try:
+                os.makedirs(directory)
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
+        if not os.path.exists(directory2):
+            try:
+                os.makedirs(directory2)
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
+            
+        exp_params = open(directory2+"/process_parameter.txt", "w")
+        exp_params.write("PROCESSDELAY = " + str(self.adw.Get_Processdelay(1)) + "\n")
+        exp_params.write("All ADwin times in units of PROCESSDELAY!\n")
+        exp_params.write("Loading time: " + str(self.loadingTime3.value())+ "\n")
+        exp_params.write("Load Detuning [V]: " + str(self.vcoBeatOffset.value())+"\n")
+        exp_params.write("Detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.vcoBeatOffset.value())/6.0)+"\n")
+        exp_params.write("Target detuning [V]: " + str(self.targetDetuning_2.value()) + "\n")
+        exp_params.write("Target detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.targetDetuning_2.value())/6.0)+"\n")
+        exp_params.write("Frequency ramp rate [탎/0.007 V]: " + str(self.rampingSpeed_2.value())+"\n")
+        exp_params.write("Optical trapping time [탎]: " + str(self.opticaltraptime.value()) + "\n")
+        exp_params.write("Exposure time [mus]: " + str(self.exposure_time.value())+"\n")
+        exp_params.close()
+
+        plot_size = 10
+        self.xdata = np.zeros(plot_size)
+        self.ydata = np.zeros(plot_size)
+            
+        ##################################################
+        ### prepare fluorescence collecting CCD camera
+        self.startAsyncMode(repetitions, self.exposure_time.value())
+        camObject.waitForTrigger()
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            self.Background_IRScatt = np.zeros(np.shape(camObject.pic))
+        elif not(hasattr(self,'Background_IRScatt')):
+            try:
+                self.Background_IRScatt = np.load("IRScatt"+str(self.exposure_time.value())+"mus.npy")
+            except IOError:
+                print("Background IR Scattering Array could not be loaded!")
+        max_triggers = 1
+        ####################################################
+        self.noUserInterrupt = True
+        j = 0
+        # since process 1 on ADWIN Gold needs an external trigger, start this process first
+        self.adw.Start_Process(1)
+        # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+        self.adwPro2.Start_Process(1)
+        while (j < repetitions and self.noUserInterrupt):
+            pg.QtGui.QApplication.processEvents()
+            try:
+                if ((self.adw.Get_Par(80) == 0) and self.noUserInterrupt):
+                    i = 0 #trigger count variable
+                    # initialize 
+                    self.adw.Set_Par(79, 1)
+                    self.adwPro2.Set_Par(79,1)
+                    # start case 4, but start it on ADWin Pro II first, because the sequence already runs and is triggering.
+                    self.adwPro2.Set_Par(80,5)
+                    self.adw.Set_Par(80, 5)
+            except ADwinError, e:
+                print '***', e
+            if (not(self.daqEnable_2.isChecked())):
+                while(i < max_triggers and self.noUserInterrupt):
+                    pg.QtGui.QApplication.processEvents()
+                    if camObject.waitForBuffer(0):
+                        camObject.image[j] = camObject.returnBuffer(0)
+                        camObject.AddBufferToQueue(0)
+                        i += 1
+                        self.roi.setState(camObject.ROIState, False)
+                        # substract background counts from taken image
+                        woBackGnd = np.array(camObject.image[j]-self.Background_IRScatt)
+                        # show taken image wo background
+                        self.img.setImage(woBackGnd)
+                        ROI_woBackGnd = self.roi.getArrayRegion(woBackGnd, self.img)
+                        ROI_profile = ROI_woBackGnd.sum(axis=self.roiProfilePlot.currentIndex())
+                        # show cloud profile
+                        self.p3.plot(ROI_profile,clear=True)
+                        # plot either ROI sum or max of ROI profile
+                        self.xdata = np.roll(self.xdata, -1)
+                        self.ydata = np.roll(self.ydata,-1)
+                        self.xdata[-1] = self.xdata[-2] + 1
+                        if self.plotOptions.currentIndex() == 0:
+                            self.ydata[-1] = np.sum(ROI_profile)
+                        elif self.plotOptions.currentIndex() == 1:
+                            self.ydata[-1] = np.max(ROI_woBackGnd)
+                        else:
+                            self.ydata[-1] = np.max(ROI_profile)/np.min(ROI_profile)
+                        self.curve.setData(self.xdata, self.ydata)
+                        print "Received triggers: ", i, "\n"
+            if (self.dipoleTransferROIBackgnd.isChecked()):
+                j+=1
+        print "Number of repetitions: ", j, "\n"
+        
+        if(self.dipoleTransferROIBackgnd.isChecked()):
+            self.Background_IRScatt = np.mean(camObject.image, axis=0)
+            np.save("IRScatt"+str(self.exposure_time.value())+"mus", self.Background_IRScatt)
+        self.plotOptions.setCurrentIndex(0)
+        self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b0111111111111) # switch off pwr supply
+        energy3000.setModes(2,1) # lab, remote
+        energy3000.setActiveBank(0) # set std bank for continuous operation
+        energy3000.setModes(2,0) # lab, local
+        if(self.motCurrentTTL.isChecked()):
+            self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b1000000000000) # switch on pwr supply
+                   
+    
     def startOpticalTrapLoad(self):
         self.stopVideo()
-        global time_unit
-        
+        global time_unit, time_unit2
         if (self.dipoleTransferROIBackgnd.isChecked()):
             repetitions = self.averageSample.value()
         else:
-            repetitions = self.repetitions_2.value()
+            repetitions = 1
+        if self.loadDipoleTrapAbsorpImag.isChecked():
+            readout_time = 148000
+        else:
+            readout_time = 90000
         
         try:
+            # preparing the power supply for sequence mode
+            self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b0111111111111) # switch off pwr supply
+            energy3000.setModes(3,0) # sequence, local  
+            self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b1000000000000) # switch on pwr supply
+
+
+            ####### block for stopping slow sequence and starting a fast sequence##########
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
             self.adw.Stop_Process(2)
-            self.adw.Start_Process(1)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)            
+            ###########################################################################
+            
+            # set number of recaptures before reloading MOT
+            self.adw.Set_Par(46, self.noRecaptures.value())
+            self.adwPro2.Set_Par(46, self.noRecaptures.value())
+
+
+            # delay time of uniblitz shutter
+            self.adwPro2.Set_Par(60, int(math.ceil(self.uniblitzDelay.value()/time_unit2)))
+            
             # write important timings into ADwin variables
             # shutter delay of 10 ms
-            self.adw.Set_Par(12, int(math.ceil(10000/time_unit)))
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit2)))
             # time for loading @ load detuning and intensities
-            self.adw.Set_Par(13, self.loadingTime3.value())
-            # molasse cool time
-            self.adw.Set_Par(29, int(self.molasseCoolTime_2.value()/time_unit))
+            self.adw.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit)))
+            self.adwPro2.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit2)))
+            # trigger delay time
+            self.adw.Set_Par(53, int(math.ceil(self.trigDelayPxUsb.value()/10/time_unit)))
+            self.adwPro2.Set_Par(53, int(math.ceil(self.trigDelayPxUsb.value()/10/time_unit2)))
             # exposure time
-            self.adw.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit)))
-            # exposure time + read out time
-            self.adw.Set_Par(15, int(math.ceil((90000+self.exposure_time.value())/time_unit)))
+            if (self.loadDipoleTrapAbsorpImag.isChecked()):
+                self.adw.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit)))
+                self.adwPro2.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit2)))
+            else:
+                self.adw.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit)))
+                self.adwPro2.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit2)))
+            # exposure time + read out time            
+            self.adw.Set_Par(15, int(math.ceil(readout_time/time_unit)))
+            self.adwPro2.Set_Par(15, int(math.ceil(readout_time/time_unit2)))
             # optical trap time
             self.adw.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit)))
+            self.adwPro2.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit2)))
 
             # setting initial and target values
             # for beat offset value
             self.adw.Set_FPar(11, self.vcoBeatOffset.value())
-            self.adw.Set_FPar(13, self.targetDetuning_2.value())
+            
             # for cooler intensity
             self.adw.Set_FPar(17, self.vcaCooler.value())
-            self.adw.Set_FPar(15, self.vcaCoolerTarget_2.value())        
             # for repumper intensity
-            self.adw.Set_FPar(18, self.vcaRepumper.value())
-            self.adw.Set_FPar(16, self.vcaRepumperTarget_2.value())
+            self.adw.Set_FPar(18, self.vcaRepumper.value())            
             # for dipole laser power
             self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value()) # initial dipole power
             self.adw.Set_FPar(23, 10)
             # for rf driver power
             self.adw.Set_FPar(20, self.RFdriveramp.value()) # initial rf power
             self.adw.Set_FPar(24,5)
-            # for mot current
-            self.adw.Set_FPar(37, self.motCoilCurrent.value())
 
-            # variables for the ramps
-            ramptime = int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/0.007*self.rampingSpeed_2.value()/time_unit))
-            voltstep = 0.007/self.rampingSpeed_2.value()*time_unit
-            # total ramp time for the frequency ramp
-            self.adw.Set_Par(16, ramptime)
-            # volt step for the frequency ramp
-            self.adw.Set_FPar(25, voltstep)
-            # volt step for cooler intensity ramp
-            if ramptime == 0:
-                self.adw.Set_FPar(28, 0)
-            else:
-                self.adw.Set_FPar(28, (self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime)
-            # volt step for repumper intensity ramp
-            if ramptime == 0:
-                self.adw.Set_FPar(29, 0)
-            else:
-                self.adw.Set_FPar(29, (self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime)
-
-            if (self.dipoleTransferROIBackgnd.isChecked()):
-                self.adw.Set_Par(36, 1)            
-            else:
-                self.adw.Set_Par(36, 0)
+            #for pushing beam
+            self.adwPro2.Set_Par(59, int(self.pushBeam.isChecked()))
+            self.adwPro2.Set_Par(62, int(math.ceil(self.pushTime.value()/time_unit2)))
+            
+            # Kniel delay
+            self.adw.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit)))
+            self.adwPro2.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit2)))
+            # recooling time
+            self.adw.Set_Par(48, int(math.ceil(self.recoolTime.value()/time_unit)))
+            self.adwPro2.Set_Par(48, int(math.ceil(self.recoolTime.value()/time_unit2)))
+            # write some VCO control voltages
+            self.adwPro2.Set_FPar(40, self.zeemanSlowFreq.value())
+            self.adwPro2.Set_FPar(41, self.imagingFreq.value())
+            self.adwPro2.Set_FPar(42, self.coolerFreq.value())
+            self.adwPro2.Set_FPar(43, self.repumpFreq.value())
+            
+            # for ionization of atoms out of dipole trap
+            self.adw.Set_Par(44, int(self.motBeamsOnDipoleTrap.isChecked()))
+            # for data acquisition after magnetic field has been switched off
+            self.adw.Set_Par(51, int(self.daqEnable_2.isChecked()))
+            self.adw.Set_Par(52, int(self.fsSync.isChecked()))
+            # for switching on the PA beam during the sequence
+            self.adwPro2.Set_Par(54, int(self.PAbeam.isChecked()))
+            self.adw.Set_Par(54, int(self.PAbeam.isChecked()))
+            
+                    
+                
+            # delay for switching off the current of the MOT coils
+            self.adw.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit2)))
+            # response delay of femto shutter
+            self.adw.Set_Par(56, int(math.ceil(self.femtoShutterDelay.value())))
+                            
+            self.adw.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            self.adwPro2.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            self.adw.Set_Par(37, int(self.loadDipoleTrapAbsorpImag.isChecked()))
+            self.adwPro2.Set_Par(37, int(self.loadDipoleTrapAbsorpImag.isChecked()))
+                        
             # mot current
             self.adw.Set_FPar(39, self.maxMOTCurrent_2.value())
             # number of times sequence will be repeated
             self.adw.Set_Par(11, repetitions)
+            self.adwPro2.Set_Par(11, repetitions)
             
         except ADwinError, e:
             print '***', e
 
         # create filename
         today = time.strftime("%d%m")+time.strftime("%Y")[2:]
-        directory = "Z:/Experimental Control/Python Experimental Control/Measurements/TransferEfficiency/"+today
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/TransferEfficiency/"+today
+        if (self.daqEnable.isChecked()):
+            directory = "Y:/ReactionMicroscopeData/IonSpectraForDipoleTrap/"+today
         directory2 = directory + time.strftime("/%Hh_%Mm")
 
         if(not(self.dipoleTransferROIBackgnd.isChecked())):
@@ -1134,8 +1918,7 @@ class MainGUIThread(QtGui.QMainWindow):
             exp_params = open(directory2+"/process_parameter.txt", "w")
             exp_params.write("PROCESSDELAY = " + str(self.adw.Get_Processdelay(1)) + "\n")
             exp_params.write("All ADwin times in units of PROCESSDELAY!\n")
-            exp_params.write("Number of repetitions: " + str(self.repetitions.value()) + "\n")
-            exp_params.write("Loading time: " + str(self.loadingTime.value())+ "\n")
+            exp_params.write("Loading time: " + str(self.loadingTime3.value())+ "\n")
             exp_params.write("Load Detuning [V]: " + str(self.vcoBeatOffset.value())+"\n")
             exp_params.write("Detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.vcoBeatOffset.value())/6.0)+"\n")
             exp_params.write("Target detuning [V]: " + str(self.targetDetuning_2.value()) + "\n")
@@ -1145,112 +1928,2002 @@ class MainGUIThread(QtGui.QMainWindow):
             exp_params.write("Exposure time [mus]: " + str(self.exposure_time.value())+"\n")
             exp_params.close()
 
-        if(self.dipoleTransferROIBackgnd.isChecked()==False):
-            expno = np.arange(repetitions)
-            atomnumber = np.zeros(repetitions)
-            mean_line = np.full(repetitions, np.sum(camObject.ROIBackground))
-            stddev_line = np.full(repetitions, np.sum(camObject.ROIBackground)+2*np.sum(camObject.ROIBackgroundStdDev))
-            atomnumber_plot = pg.plot()
-            mean_line_curve = atomnumber_plot.plot(expno, mean_line, pen='r')
-            stddev_line_curve = atomnumber_plot.plot(expno, stddev_line, pen='b')
-            atomnumber_curve = atomnumber_plot.plot(expno, atomnumber, pen='y')
-            
+        plot_size = 10
         
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            self.xdata = np.zeros(plot_size)
+            self.ydata = np.zeros(plot_size)
+                    
+        
+        sum_img = np.zeros(self.ROIBackground.shape)
+        # reinitialize the Background
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            self.Background_IRScatt = np.zeros(np.shape(camObject.pic))
+        elif not(hasattr(self,'Background_IRScatt')):
+            try:
+                self.Background_IRScatt = np.load("IRScatt"+str(self.exposure_time.value())+"mus.npy")
+            except IOError:
+                print("Background IR Scattering Array could not be loaded!")
+              
+        # ############################
+        
+        if (self.loadDipoleTrapAbsorpImag.isChecked()):
+            ######################################################
+            
+            ### prepare absorption imaging camera
+            camObject2.stopCamera()                       
+            # setting camera object's internal 2D numpy to zero for adding up exposures
+            camObject2.pic = np.zeros((camObject2.v_max, camObject2.h_max))
+            ### camera settings ###
+            # adjust IR sensitivity to low
+            camObject2.setGain('LOW')
+            #choose low read-out speed for low image noise
+            camObject2.pixel_rate(12000000)
+            # set trigger mode to [external exposure start & software trigger]
+            camObject2.setTriggerMode(2)
+            # set acquire mode to [auto]
+            camObject2.setAcquireMode(0)
+            # set exposure time in 탎
+            camObject2.exposure_time(self.absorpImgExpTime.value(),1, True)
+            # arm camera again
+            camObject2.arm_camera()
+            camObject2.setRecordingState(1)
+            # by default, two buffers are added to the queue
+            camObject2.addAllBufferToQueue()
+            #initialize count variable for trigger edges
+            max_triggers = 2
+            if hasattr(self,'drkCnts'):
+                Ibg = self.drkCnts*self.absorpImgExpTime.value()
+            else:
+                Ibg = scipy.ndimage.imread("AI_dark_cnts.png")*self.absorpImgExpTime.value()
+            Iabs, Iref = 0,0
+                                
+        doAbsImg = self.loadDipoleTrapAbsorpImag.isChecked()
+        
+        max_triggers = 1
+        if doAbsImg:
+            max_triggers = 2
+        ##################################################
+        ### prepare fluorescence collecting CCD camera
         self.startAsyncMode(repetitions, self.exposure_time.value())
-
-        sum_img = np.zeros(camObject.ROIBackground.shape)
-        i = 0
-        camObject.ROIBackground = np.zeros(camObject.ROIBackground.shape)
-        camObject.ROIBackgroundStdDev = np.zeros(camObject.ROIBackground.shape)
-        try:
-            self.adw.Set_Par(79, 1) # to initialize variables of the ADwin section
-            self.adw.Set_Par(80, 4)
-            while(self.adw.Get_Par(80) == 4):
-                camObject.waitForTrigger()
-                if camObject.waitForBuffer(0):
-                    camObject.image[i] = camObject.returnBuffer(0)
-                    camObject.resetEvent(0)
-                    selected = camObject.roi.getArrayRegion(camObject.image[i], camObject.img)
-                    # show taken image
-                    camObject.img.setImage(camObject.image[i])
-                    # show cloud profile
-                    self.p3.plot(selected.sum(axis=1),clear=True)
-                    # calculate average background counts of each pixel + their std dev
-                    i += 1
-                    if(self.dipoleTransferROIBackgnd.isChecked()):
-                        delta = selected - camObject.ROIBackground
-                        camObject.ROIBackground += delta/i
-                        delta2 = selected - camObject.ROIBackground
-                        camObject.ROIBackgroundStdDev += delta*delta2
-                    else:
-                        atomnumber[-1] = np.sum(selected)
-                        atomnumber_curve.setData(expno, atomnumber)
-                        atomnumber = np.roll(atomnumber, -1)
-                        i %= repetitions
+        camObject.waitForTrigger()
+        ####################################################
+               
+        self.noUserInterrupt = True       
+                
+        # take all repetitions pictures in case of ROI Background
+        # substraction
+        self.ROIMean = 0
+        runningindex = 1
+        logging = True
+        j = 0
+        self.movingAvgIndex = 2
+        while (j < repetitions and self.noUserInterrupt):
+            pg.QtGui.QApplication.processEvents()
+            try:
+                # log specific analog output voltages during sequence
+                if (logging):
+                    self.adw.Set_Par(24,0)
+                    self.adw.Set_Par(77,1)
+                    logging = False
+                # imaging detuning
+                self.adw.Set_FPar(51, self.imagDetuning.value())
+                # imaging beam intensity
+                self.adw.Set_FPar(31, self.imagMod.value())                
+                # for pump time
+                self.adw.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit)))
+                self.adwPro2.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit2)))
+                # set flight time
+                self.adw.Set_Par(14, int(math.floor(self.optTrapFlightTime.value()/time_unit)))
+                self.adwPro2.Set_Par(14, int(math.floor(self.optTrapFlightTime.value()/time_unit2)))
+                self.adw.Set_FPar(13, self.targetDetuning_2.value())
+                # variables for the ramps
+                ramptime = int(math.ceil(abs((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/0.007*self.rampingSpeed_2.value()/time_unit)))
+                ramptime2 = int(math.ceil(abs((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/0.007*self.rampingSpeed_2.value()/time_unit2)))
+                voltstep = 0.007/self.rampingSpeed_2.value()*time_unit
+                # total ramp time for the frequency ramp
+                self.adw.Set_Par(16, ramptime)
+                self.adwPro2.Set_Par(16, ramptime2)
+                # volt step for the frequency ramp
+                self.adw.Set_FPar(25, voltstep)
+                # backramp
+                backramptime = int(math.ceil(abs((self.imagDetuning.value()-self.targetDetuning_2.value())/(0.007*time_unit))))
+                backramptime2 = int(math.ceil(abs((self.imagDetuning.value()-self.targetDetuning_2.value())/(0.007*time_unit2))))
+                backvoltstep = 0.007*time_unit
+                # total ramp time for ramping frequency background
+                self.adw.Set_Par(50, backramptime)
+                self.adwPro2.Set_Par(50, backramptime2)
+                # volt step for back frequency ramp
+                self.adw.Set_FPar(50, backvoltstep)
+                # low intensities for MOT beams near resonance
+                self.adw.Set_FPar(15, self.vcaCoolerTarget_2.value())
+                self.adw.Set_FPar(16, self.vcaRepumperTarget_2.value())
+                if (self.PAbeam.isChecked()):
+                    self.adw.Set_Par(29, int(math.ceil(self.PAbeamExp.value()/time_unit)))
+                    self.adwPro2.Set_Par(29, int(math.ceil(self.PAbeamExp.value()/time_unit2)))
+                else:
+                    self.adw.Set_Par(29, int(math.ceil(self.molasseCoolTime_2.value()/time_unit)))
+                    self.adwPro2.Set_Par(29, int(math.ceil(self.molasseCoolTime_2.value()/time_unit)))
+                # volt step for cooler intensity ramp
+                if ramptime == 0:
+                    self.adw.Set_FPar(28, 0)
+                else:
+                    self.adw.Set_FPar(28, abs((self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime))
+                # volt step for repumper intensity ramp
+                if ramptime == 0:
+                    self.adw.Set_FPar(29, 0)
+                else:
+                    self.adw.Set_FPar(29, (self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime)        
+                # initialize 
+                self.adw.Set_Par(79, 1)
+                self.adwPro2.Set_Par(79,1)
+                # start case 4, but start it on ADWin Pro II first, because the sequence already runs and is triggering.
+                self.adwPro2.Set_Par(80,4)
+                self.adw.Set_Par(80, 4)
+                # since process 1 on ADWIN Gold needs an external trigger, start this process first
+                self.adw.Start_Process(1)
+                # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+                self.adwPro2.Start_Process(1)
+                
+            except ADwinError, e:
+                print '***', e
+            i = 0 
+            while(i < max_triggers and self.noUserInterrupt):            
                 pg.QtGui.QApplication.processEvents()
-                if self.adw.Get_Par(78) == 1: #in case, sequence has to be interrupted
-                    self.adw.Set_Par(78,0)
-                    self.adw.Set_Par(80,0)
-                    if(not(self.dipoleTransferROIBackgnd.isChecked())):
-                        print "print AnalogTimeGraph: "
-                        self.writeAnalogTimingGraph([9,6,7,10,11,8,12], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Dipole power [V]\t RF driver power [V]\t Beat VCO [V]\t MOT current [V]")
-                    self.adw.Stop_Process(1)
-                    self.adw.Start_Process(2)
-                    camObject.image = np.zeros((2, camObject.ccdysize, camObject.ccdxsize))
-                    self.startVideo()
-                    return
-            self.adw.Stop_Process(1)
-            self.adw.Start_Process(2)
+                # in case the atoms should be imaged with absorption imaging
+                if doAbsImg:
+                    if(camObject2.waitForBuffer()):
+                        camObject2.readOutBuffer()
+                        camObject2.updateImage()
+                        if (i==0):
+                            Iabs = np.array(camObject2.pic,dtype=np.float64)
+                        if (i==1):
+                            Iref = np.array(camObject2.pic,dtype=np.float64)
+                            print "Calculating optical density...\n"
+                            #################################################
+                            ## calculate optical density from both images
+                            tshadow = np.array((Iabs-Ibg)-np.min(Iabs-Ibg)+1.0) 
+                            tshadow /= np.max(tshadow)
+                            tlight = np.array((Iref-Ibg)-np.min(Iref-Ibg)+1.0)
+                            tlight /= np.max(tlight)
+                            # calculate OD
+                            OD = np.log(tshadow/tlight)
+                            # remove negative entries from OD for plotting, more absorption will result in darger regions
+                            ODplot = np.array(OD - np.min(OD))
+                            OD *= (-1)                
+                            self.roi.setState(camObject2.ROIState, False)
+                            ROI_OD = np.array(self.roi.getArrayRegion(OD, self.img))
+                            if (self.averageROIProfile.isChecked()):
+                                fraction = float(self.movingAvgIndex-1)/(self.movingAvgIndex)
+                                print "Index: ", self.movingAvgIndex, "\n"
+                                print "Fraction: ", fraction, "\n"
+                                ROI_profile = ROI_profile*fraction + ROI_OD.sum(axis=self.roiProfilePlot.currentIndex())/float(self.movingAvgIndex)
+                                self.movingAvgIndex +=1
+                                print "np.sum(ROI_profile) = ", np.sum(ROI_profile)
+                            else:
+                                ROI_profile = ROI_OD.sum(axis=self.roiProfilePlot.currentIndex())                            
+          
+                            self.img.setImage(ODplot)
+                            self.p3.plot(ROI_profile,clear=True, pen=(1,3))
+                            
+                            self.xdata = np.roll(self.xdata, -1)
+                            self.ydata = np.roll(self.ydata,-1)
+                            self.xdata[-1] = self.xdata[-2] + 1
+                            self.ydata[-1] = np.max(ROI_OD.sum(axis=self.roiProfilePlot.currentIndex()))
+                            self.curve.setData(self.xdata, self.ydata) 
+                        
+                        camObject2.resetEvent()                        
+                        i+=1                      
+                                                                                                                         
+                # if the atoms should be imaged with fluorescence imaging
+                else:
+                    if camObject.waitForBuffer(0):
+                        camObject.image[j] = camObject.returnBuffer(0)
+                        camObject.AddBufferToQueue(0)
+                        i += 1
+                        self.roi.setState(camObject.ROIState, False)
+                        if(self.dipoleTransferROIBackgnd.isChecked()):
+                            self.img.setImage(camObject.image[j])
+                            ROI_profile = np.sum(camObject.image[j],axis=self.roiProfilePlot.currentIndex())
+                            # show cloud profile
+                            self.p3.plot(ROI_profile,clear=True)
+                        else:
+                            # substract background counts from taken image
+                            woBackGnd = np.array(camObject.image[j]-self.Background_IRScatt)
+                            # show taken image wo background
+                            self.img.setImage(woBackGnd)                      
+                            ROI_woBackGnd = self.roi.getArrayRegion(woBackGnd, self.img)
+                            
+                            # cloud profile in ROI without background
+                            if (self.averageROIProfile.isChecked()):
+                                fraction = float(self.movingAvgIndex-1.0)/(self.movingAvgIndex)
+                                print "Index: ", self.movingAvgIndex, "\n"
+                                print "Fraction: ", fraction, "\n"
+                                ROI_profile = ROI_profile*fraction + np.sum(ROI_woBackGnd,axis=self.roiProfilePlot.currentIndex())/float(self.movingAvgIndex)
+                                maxpixelcnt = maxpixelcnt*fraction + np.max(ROI_woBackGnd)/float(self.movingAvgIndex)
+                                self.movingAvgIndex +=1
+                                print "np.sum(ROI_profile) = ", np.sum(ROI_profile)
+                                print "Current maximum count in ROI (one pixel): ", np.max(ROI_woBackGnd), "\n"
+                                print "Maximum averaged count in ROI (one pixel): ", maxpixelcnt, "\n"
+                            else:
+                                ROI_profile = np.sum(ROI_woBackGnd,axis=self.roiProfilePlot.currentIndex())
+                                maxpixelcnt = np.max(ROI_woBackGnd)
+                                print "Maximum count in ROI (one pixel): ", maxpixelcnt, "\n"
+                            
+                            # show cloud profile
+                            self.p3.plot(ROI_profile,clear=True)
+                            if self.doFit.isChecked():
+                                # now fit a Gaussian to this profile with gap
+                                # now take the Gaussian with fitted parameter
+                                yfit = np.zeros(np.shape(ROI_profile))
+                                xvalues = np.arange(0, np.shape(ROI_profile)[0])
+                                self.params = fitGaussianProfile(xvalues, ROI_profile, yfit)
+                                print("Sigma from Gaussian Fit: ", self.params[0][1])
+                                # show fitted profile
+                                self.p3.plot(yfit,pen=(2,3))     
+                                
+                        # plot either ROI sum or max of ROI profile
+                        self.xdata = np.roll(self.xdata, -1)
+                        self.ydata = np.roll(self.ydata,-1)
+                        
+                        self.xdata[-1] = self.xdata[-2] + 1
+                        # plot in right window the difference between the sum
+                        # of the gaussian profile fit and the total profile
+                        if self.doFit.isChecked():
+                            #signal = np.sum(ROI_profile-yfit)
+                            #self.ydata[-1] = signal
+                            # plot sigma of plot
+                            self.ydata[-1] = self.params[0][2]/np.sqrt(self.params[0][1])
+                        else:                              
+                            if self.plotOptions.currentIndex() == 0:
+                                self.ydata[-1] = np.sum(ROI_profile)
+                                self.ROIMean = self.ROIMean*(runningindex-1)/runningindex + self.ydata[-1]/runningindex
+                                runningindex +=1 
+                                print "ROI sum: ", self.ROIMean
+                            elif self.plotOptions.currentIndex() == 1:
+                                self.ydata[-1] = np.max(ROI_profile)
+                            else:
+                                self.ydata[-1] = np.max(ROI_profile)/np.min(ROI_profile)
+                        self.curve.setData(self.xdata, self.ydata)
+                # probe fluorescence counts in dependence of imaging frequency
+            print "Received triggers: ", i, "\n"            
+            
+            # calculate optical density from the two images, shadow and light
+            if (self.loadDipoleTrapAbsorpImag.isChecked()):                                    
+                if self.doFit.isChecked():
+                    yvals = ROI_OD.sum(axis=self.roiProfilePlot.currentIndex())
+                    xvals = np.arange(len(yvals))
+                    yfit = np.zeros(np.shape(yvals))
+                    params = fitGaussianProfile(xvals, yvals, yfit)
+                    self.p3.plot(yfit, pen=(2,3)) 
+                    baseline = linearSlope(xvals, params[4], params[3])
+                    self.p3.plot(baseline, pen=(3,3))
+                    area = np.sum(yfit - baseline)
+                    print "Gaussian amplitude: ", params[2], "\n"
+                    print "Atom number from Absorption Imaging: ", 194.1*area, "\n"
+                
+            if (self.dipoleTransferROIBackgnd.isChecked()):
+                j+=1 
+            print "Iteration no. ", j, " is over."
+        
+        print "Number of repetitions: ", j, "\n"
+        
+        # all pictures are taken, postprocessing depending on 
+        # values of checkboxes
+        # 1) calculating background counts
+        if(self.dipoleTransferROIBackgnd.isChecked() and j == repetitions):
+            print "Storing scattering background\n"
+            self.Background_IRScatt = np.mean(camObject.image, axis=0)
+            imageio.imwrite("IRScatt.png", self.Background_IRScatt)
+            np.save("IRScatt"+str(self.exposure_time.value())+"mus", self.Background_IRScatt)
+            self.img.setImage(self.Background_IRScatt)
+            ROI_profile = np.sum(self.Background_IRScatt,axis=self.roiProfilePlot.currentIndex())
+            self.p3.plot(ROI_profile,clear=True)
+            
+        # store last shadow, light and od picture into folder
+        if (self.loadDipoleTrapAbsorpImag.isChecked() and i==2):
+            print "Saving last pictures..."            
+            scipy.misc.imsave(directory2+"/shadow_gray.png", tshadow)
+            scipy.misc.imsave(directory2+"/light_gray.png", tlight)                   
+            # calculate OD
+            OD = np.log(tshadow/tlight)
+            # remove negative entries from OD for plotting, more absorption will result in darker regions
+            ODplot = np.array(OD - np.min(OD))
+            OD *= (-1)
+            scipy.misc.imsave(directory2+"/OD.png",ODplot)
+            print "Done."
+            print "Data saved in " + directory2 + "."
+            
+        self.plotOptions.setCurrentIndex(0)
+        self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b0111111111111) # switch off pwr supply
+        energy3000.setModes(2,1) # lab, remote
+        energy3000.setActiveBank(0) # set std bank for continuous operation
+        energy3000.setModes(2,0) # lab, local
+        if(self.motCurrentTTL.isChecked()):
+            self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b1000000000000) # switch on pwr supply
+
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            self.writeAnalogTimingGraph([9,6,7,10,11,8,12,14,16,13], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Dipole power [V]\t RF driver power [V]\t Beat VCO [V]\t MOT current [V]\t Imag Mod [V]\t DAQ enable [V]\t Cam TTL")
+        
+    def measureTransferEfficiency(self):
+        self.stopVideo()
+        global time_unit
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            repetitions = self.averageSample.value()
+        else:
+            repetitions = 1
+        readout_time = 90000
+        
+        try:
+            # switch off Kniel power supply
+            #self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+
+            ####### block for stopping slow sequence and starting a fast sequence##########
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
+            self.adw.Stop_Process(2)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)            
+            # since process 1 on ADWIN Gold terminates itself, it has to be restarted
+            self.adw.Start_Process(1)
+            # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+            self.adwPro2.Start_Process(1)
+            ###########################################################################
+
+
+            # set number of recaptures before reloading MOT
+            self.adw.Set_Par(46, self.noRecaptures.value())
+            self.adwPro2.Set_Par(46, self.noRecaptures.value())
+            # write important timings into ADwin variables
+            # shutter delay of 10 ms
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit2)))
+
+            # time for loading @ load detuning and intensities
+            self.adw.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit)))
+            self.adwPro2.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit2)))
+            
+            # exposure time
+            if (self.loadDipoleTrapAbsorpImag.isChecked()):
+                self.adw.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit)))
+                self.adwPro2.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit2)))
+                #self.adw.Set_Par(25, int(math.ceil(1/time_unit)))
+            else:
+                self.adw.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit)))
+                self.adwPro2.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit2)))
+            # exposure time + read out time            
+            self.adw.Set_Par(15, int(math.ceil(readout_time/time_unit)))
+            self.adwPro2.Set_Par(15, int(math.ceil(readout_time/time_unit2)))
+            # optical trap time
+            self.adw.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit)))
+            self.adwPro2.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit2)))
+
+            # setting initial and target values
+            # for beat offset value
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            
+            # for cooler intensity
+            self.adw.Set_FPar(17, self.vcaCooler.value())                    
+            # for repumper intensity
+            self.adw.Set_FPar(18, self.vcaRepumper.value())            
+            # for dipole laser power
+            self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value()) # initial dipole power
+            self.adw.Set_FPar(23, 10)
+            # for rf driver power
+            self.adw.Set_FPar(20, self.RFdriveramp.value()) # initial rf power
+            self.adw.Set_FPar(24,5)
+            # for mot current
+            self.adw.Set_FPar(37, self.motCoilCurrent.value())
+            
+            # imaging beam intensity
+            self.adw.Set_FPar(31, self.imagMod.value())
+            # Kniel delay
+            self.adw.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit)))
+            self.adwPro2.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit2)))
+            # recooling time
+            self.adw.Set_Par(48, int(math.ceil(self.recoolTime.value()/time_unit)))
+            self.adwPro2.Set_Par(48, int(math.ceil(self.recoolTime.value()/time_unit2)))
+
+            
+            # for ionization of atoms out of dipole trap
+            self.adw.Set_Par(44, int(self.motBeamsOnDipoleTrap.isChecked()))
+            # for data acquisition after magnetic field has been switched off
+            self.adw.Set_Par(51, int(self.daqEnable_2.isChecked()))
+                
+            # delay for switching off the current of the MOT coils
+            self.adw.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit2)))
+                            
+            self.adw.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            self.adwPro2.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            self.adw.Set_Par(37, int(self.loadDipoleTrapAbsorpImag.isChecked()))
+            self.adwPro2.Set_Par(37, int(self.loadDipoleTrapAbsorpImag.isChecked()))
+                        
+            # mot current
+            self.adw.Set_FPar(39, self.maxMOTCurrent_2.value())
+            # number of times sequence will be repeated
+            self.adw.Set_Par(11, repetitions)
+            self.adwPro2.Set_Par(11, repetitions)
+            
         except ADwinError, e:
             print '***', e
-        print "Number of triggers received: ", i
-        if i != repetitions:
-            print "Error: Not all triggers received. Adjust timing!"
 
-      
-        # post-processing of images: calculate atom number                    
-        if(self.dipoleTransferROIBackgnd.isChecked()):
-            if ( i < 2 ):
-                camObject.ROIBackgroundStdDev = np.full(camObject.ROIBackground.shape, np.nan)
-            else:
-                camObject.ROIBackgroundStdDev = np.sqrt(camObject.ROIBackgroundStdDev/(i-1))
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/TransferEfficiency/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            if not os.path.exists(directory):
+                try:
+                    os.makedirs(directory)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            if not os.path.exists(directory2):
+                try:
+                    os.makedirs(directory2)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            
+            exp_params = open(directory2+"/process_parameter.txt", "w")
+            exp_params.write("PROCESSDELAY = " + str(self.adw.Get_Processdelay(1)) + "\n")
+            exp_params.write("All ADwin times in units of PROCESSDELAY!\n")
+            exp_params.write("Loading time: " + str(self.loadingTime3.value())+ "\n")
+            exp_params.write("Load Detuning [V]: " + str(self.vcoBeatOffset.value())+"\n")
+            exp_params.write("Detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.vcoBeatOffset.value())/6.0)+"\n")
+            exp_params.write("Target detuning [V]: " + str(self.targetDetuning_2.value()) + "\n")
+            exp_params.write("Target detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.targetDetuning_2.value())/6.0)+"\n")
+            exp_params.write("Frequency ramp rate [탎/0.007 V]: " + str(self.rampingSpeed_2.value())+"\n")
+            exp_params.write("Optical trapping time [탎]: " + str(self.opticaltraptime.value()) + "\n")
+            exp_params.write("Exposure time [mus]: " + str(self.exposure_time.value())+"\n")
+            exp_params.close()
+
+        plot_size = 10
+        
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            self.xdata = np.zeros(plot_size)
+            self.ydata = np.zeros(plot_size)
+                    
+        
+        sum_img = np.zeros(self.ROIBackground.shape)
+        # reinitialize the Background
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            self.Background_MOT = np.zeros(np.shape(camObject.pic))
+            self.Background_IRScatt = np.zeros(np.shape(camObject.pic))
+        # in case background has not been taken before
+        if not(hasattr(self,'BackgroundMOT')):
+            self.Background_MOT = np.zeros(np.shape(camObject.pic))
+        if not(hasattr(self,'Background_IRScatt')):
+            self.Background_IRScatt = np.zeros(np.shape(camObject.pic))
+            
+        
+        # preparing the power supply for sequence mode
+        
+        # ######configuration of Kniel sequence 
+        # # switch off power supply in order to change control mode (done, since Par_80 = 0)
+        # energy3000.setModes(3,1) # sequence, remote
+        # # step 1: 60 A for (2* shutter_delay + loading_time - ramp_time)
+        # # step 2: 120 A for (ramp_time)
+        # # step 3: 0 A for molassecooltime + opticaltraptime +0.025 + exposure_and_readout
+        
+        # current_seq = {0:{'TIME':2*self.ovenShutterDelay.value()*1E-6+self.loadingTime3.value()*1E-6-1.379, 'SV':35, 'SC':60,'SP':3060, 'BANK':10, 'TYPE':0, 'MODE':0}, 1:{'TIME':(ramptime*time_unit+self.molasseCoolTime_2.value()+self.optPumpTime.value()+self.opticaltraptime.value()+25+self.exposure_time.value()+0.5*self.readOutDelay.value())*1E-6 , 'SV':35, 'SC':120,'SP':3060, 'BANK':11, 'TYPE':0, 'MODE':0}, 2:{'TIME':0.5*self.readOutDelay.value()*1E-6, 'SV':35, 'SC':60,'SP':3060, 'BANK':12, 'TYPE':0, 'MODE':0}}
+        # if (self.reloadKniel.isChecked()):
+            # energy3000.seq = current_seq
+            # energy3000.writeSequence(current_seq)
+            # self.knielTable.updateTable()
+        # energy3000.setModes(3,0) # sequence, local        
+        # ############################
+        
+        
+        max_triggers = 2
+        ##################################################
+        ### prepare fluorescence collecting CCD camera
+        self.startAsyncMode(repetitions, self.exposure_time.value())
+        camObject.waitForTrigger()
+        ####################################################
+               
+        self.noUserInterrupt = True       
                 
-##        if(not(self.dipoleTransferROIBackgnd.isChecked())):
-##            # conversion factor for counts into number of atoms for camera picture token with high gain
-##            conversionFactor = (4*math.pi/4.37)*1E6/(6.6261*4.46799804*7.62*self.scatterRate(self.targetDetuning_2.value())*self.exposure_time.value())
-##            totalCnts = np.sum(sum_img)
-##            print "Number of ROI counts  per image w background: ", totalCnts/repetitions
-##            totalCnts = np.fabs(np.sum(sum_img/repetitions - camObject.ROIBackground))
-##            print "Number of ROI counts per image wo background: ", totalCnts
-##            print "Atom number: ", totalCnts*conversionFactor, " +/- ", np.sqrt(totalCnts)*conversionFactor
-##            extract = open(directory2+"/number_of_atoms.txt", "w")
-##            extract.write("Counts: " + str(totalCnts)+"+/- " + str(np.sqrt(np.fabs(totalCnts)))+"\n")
-##            extract.write("Atom number: "+ str(totalCnts*conversionFactor)+"+/- " + str(np.sqrt(totalCnts)*conversionFactor)+"\n")
-##            extract.close()
-##            # storing images of the atom cloud
-##            scipy.misc.imsave(directory2 + "/background.png", np.transpose(camObject.ROIBackground))
-##            scipy.misc.imsave(directory2+ "/cloud_after_"+str(self.opticaltraptime.value())+ "mus_optical_trapping_w_background.png", np.transpose(sum_img))
-##            scipy.misc.imsave(directory2 + "/cloud_after_"+str(self.opticaltraptime.value())+ "mus_optical_trapping_wo_background.png", np.transpose(sum_img - self.repetitions_2.value()*camObject.ROIBackground))
-             
-        self.startVideo()
+        # take all repetitions pictures in case of ROI Background
+        # substraction
+        self.ROIMean = 0
+        runningindex = 1
+        logging = True
+        j = 0
+        while (j < repetitions and self.noUserInterrupt):
+            try:
+                # log specific analog output voltages during sequence
+                if (logging):
+                    self.adw.Set_Par(24,0)
+                    self.adw.Set_Par(77,1)
+                    logging = False
+                
+                # imaging detuning
+                self.adw.Set_FPar(51, self.imagDetuning.value())                
+                # for pump time
+                self.adw.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit)))
+                self.adwPro2.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit2)))
+                # set flight time
+                self.adw.Set_Par(14, int(math.floor(self.optTrapFlightTime.value()/time_unit)))
+                self.adwPro2.Set_Par(14, int(math.floor(self.optTrapFlightTime.value()/time_unit2)))
+                # molasse cool time
+                self.adw.Set_Par(29, int(self.molasseCoolTime_2.value()/time_unit))
+                self.adwPro2.Set_Par(29, int(self.molasseCoolTime_2.value()/time_unit2))
+                self.adw.Set_FPar(13, self.targetDetuning_2.value())
+                # variables for the ramps
+                ramptime = int(math.ceil(abs((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/0.007*self.rampingSpeed_2.value()/time_unit)))
+                ramptime2 = int(math.ceil(abs((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/0.007*self.rampingSpeed_2.value()/time_unit2)))
+                voltstep = 0.007/self.rampingSpeed_2.value()*time_unit
+                # total ramp time for the frequency ramp
+                self.adw.Set_Par(16, ramptime)
+                self.adwPro2.Set_Par(16, ramptime2)
+                # volt step for the frequency ramp
+                self.adw.Set_FPar(25, voltstep)
+                # backramp
+                backramptime = int(math.ceil(abs((self.imagDetuning.value()-self.targetDetuning_2.value())/(0.007*time_unit))))
+                backramptime2 = int(math.ceil(abs((self.imagDetuning.value()-self.targetDetuning_2.value())/(0.007*time_unit2))))
+                backvoltstep = 0.007*time_unit
+                # total ramp time for ramping frequency background
+                self.adw.Set_Par(50, backramptime)
+                self.adwPro2.Set_Par(50, backramptime2)                
+                # volt step for back frequency ramp
+                self.adw.Set_FPar(50, backvoltstep)
+                # low intensities for MOT beams near resonance
+                self.adw.Set_FPar(15, self.vcaCoolerTarget_2.value())
+                self.adw.Set_FPar(16, self.vcaRepumperTarget_2.value())
+                # volt step for cooler intensity ramp
+                if ramptime == 0:
+                    self.adw.Set_FPar(28, 0)
+                else:
+                    self.adw.Set_FPar(28, abs((self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime))
+                # volt step for repumper intensity ramp
+                if ramptime == 0:
+                    self.adw.Set_FPar(29, 0)
+                else:
+                    self.adw.Set_FPar(29, (self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime)        
+                
+                # start ADwin sequence
+                self.adw.Set_Par(79, 1)
+                self.adwPro2.Set_Par(79, 1)
+                self.adwPro2.Set_Par(80,11)
+                self.adw.Set_Par(80, 11)
+            except ADwinError, e:
+                print '***', e
+            i = 0
+            cntsBeforeTransfer, cntsInDipoleTrap = 0,0
+            while(i < max_triggers and self.noUserInterrupt):          
+                
+                # if the atoms should be imaged with fluorescence imaging
+                if camObject.waitForBuffer(0):
+                    camObject.image[j] = camObject.returnBuffer(0)
+                    camObject.AddBufferToQueue(0)
+                    i += 1
+                    if(self.dipoleTransferROIBackgnd.isChecked()):
+                        if i==1:
+                            self.Background_MOT += camObject.image[j] 
+                        if i==2:
+                            self.Background_IRScatt += camObject.image[j]
+                        
+                        self.roi.setState(camObject.ROIState, False)
+                        self.img.setImage(camObject.image[j])
+                        ROI_profile = np.sum(camObject.image[j],axis=self.roiProfilePlot.currentIndex())
+                        # show cloud profile
+                        self.p3.plot(ROI_profile,clear=True)
+                    else:
+                        if i==1:
+                            # substract background counts from taken image
+                            woBackGnd = np.array(camObject.image[j]-self.Background_MOT)
+                            # show taken image wo background
+                            self.img.setImage(woBackGnd)
+                            cntsBeforeTransfer = np.sum(self.roi2.getArrayRegion(woBackGnd, self.img))
+                            print "Counts in ROI 2: ", cntsBeforeTransfer, "\n"
+                            print "Atom number in MOT: ", 0.3455/(self.exposure_time.value()*0.001)*cntsBeforeTransfer, "\n"
+                        if i==2:
+                            # substract background counts from taken image
+                            woBackGnd = np.array(camObject.image[j]-self.Background_IRScatt)
+                            # show taken image wo background
+                            self.img.setImage(woBackGnd)
+                            cntsInDipoleTrap = np.sum(self.roi.getArrayRegion(woBackGnd, self.img))                  
+                            print "Counts in ROI 1: ", cntsInDipoleTrap, "\n"
+                        ROI_woBackGnd = self.roi.getArrayRegion(woBackGnd, self.img)
+                        # cloud profile in ROI without background
+                        ROI_profile = np.sum(ROI_woBackGnd,axis=self.roiProfilePlot.currentIndex())
+                        if i==2:
+                            np.savetxt(directory2+"/dipoleTrapROIProfile.txt",ROI_profile)
+                        print "Maximum count in ROI 1: ", np.max(ROI_woBackGnd), "\n"
+                        print "Counts in ROI 1 / Counts in ROI 2 : ", cntsInDipoleTrap/cntsBeforeTransfer
+                        # cloud profile in ROI without background
+                        ROI_profile = np.sum(ROI_woBackGnd,axis=self.roiProfilePlot.currentIndex())
+                        # show cloud profile
+                        self.p3.plot(ROI_profile,clear=True)
+                        if self.doFit.isChecked():
+                            # get maximum value of ROI profile
+                            ROIProfileMaxVal = np.max(ROI_profile)
+                            # get index of maximum value of ROI profile
+                            ROIProfileMaxValArg = np.argmax(ROI_profile)
+                            # try to fit Gaussian to cloud profile, button
+                            # ignore points with a radius given by 
+                            # self.regHalfWidth.value() around the position
+                            # of the maximum in the profile
+                                                            
+                            # create new array w points of ROI profile, except
+                            # the given region around the maximum
+                            halfwidth = self.regHalfWidth.value()
+                            ROIProfile_w_gap = np.append(np.array(ROI_profile[:ROIProfileMaxValArg-halfwidth]), np.array(ROI_profile[ROIProfileMaxValArg+halfwidth+1:len(ROI_profile)]))
+                            pixels = np.append(np.arange(0, ROIProfileMaxValArg-halfwidth), np.arange(ROIProfileMaxValArg+halfwidth+1, len(ROI_profile)))
+                            self.p3.plot(pixels, ROIProfile_w_gap,pen=(1,3)) 
+                            # now fit a Gaussian to this profile with gap 
+                            print "Shape of pixels: ", np.shape(pixels)
+                            print "Shape of gap profile: ", np.shape(ROIProfile_w_gap)
+                            params = returnGaussianProfileParams(pixels, ROIProfile_w_gap)
+                            
+                            # now take the Gaussian with fitted parameter
+                            yfit = np.zeros(np.shape(ROI_profile))
+                            fittedGaussianProfile(np.arange(len(ROI_profile)), yfit, params)
+                            # show fitted profile
+                            self.p3.plot(yfit,pen=(2,3))     
+                            
+                    # plot either ROI sum or max of ROI profile
+                    self.xdata = np.roll(self.xdata, -1)
+                    self.ydata = np.roll(self.ydata,-1)
+                    
+                    self.xdata[-1] = self.xdata[-2] + 1
+                    # plot in right window the difference between the sum
+                    # of the gaussian profile fit and the total profile
+                    if self.doFit.isChecked():
+                        signal = np.sum(ROI_profile-yfit)
+                        self.ydata[-1] = signal
+                    else:                              
+                        if self.plotOptions.currentIndex() == 0:
+                            self.ydata[-1] = np.sum(ROI_profile)
+                            self.ROIMean = self.ROIMean*(runningindex-1)/runningindex + self.ydata[-1]/runningindex
+                            runningindex +=1 
+                            #print "ROI sum: ", self.ROIMean
+                        else:
+                            self.ydata[-1] = np.max(ROI_profile)
+                    self.curve.setData(self.xdata, self.ydata)
+                # probe fluorescence counts in dependence of imaging frequency
+                pg.QtGui.QApplication.processEvents()
+            print "Received triggers: ", i, "\n"
+            if (self.dipoleTransferROIBackgnd.isChecked()):
+                j+=1      
+        print "Number of repetitions: ", j, "\n"
+        
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            self.writeAnalogTimingGraph([9,6,7,10,11,8,12,14,16,13], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Dipole power [V]\t RF driver power [V]\t Beat VCO [V]\t MOT current [V]\t Imag Mod [V]\t DAQ enable [V]\t Cam TTL")
+        # all pictures are taken, postprocessing depending on 
+        # values of checkboxes
+        # 1) calculating background counts
+        if(self.dipoleTransferROIBackgnd.isChecked() and j == repetitions):
+            print "Storing scattering background\n"
+            #self.Background_IRScatt = np.mean(camObject.image, axis=0)
+            self.Background_MOT /= repetitions
+            print "MOT Background ROI Sum: ", np.sum(self.Background_MOT), "\n"
+            self.Background_IRScatt /= repetitions
+            print "IR Scatt Background ROI Sum: ", np.sum(self.Background_IRScatt), "\n"
+            self.img.setImage(self.Background_IRScatt)
+            ROI_profile = np.sum(self.Background_IRScatt,axis=self.roiProfilePlot.currentIndex())
+            self.p3.plot(ROI_profile,clear=True)
+            
+        # 2) calculate optical density from the two images, shadow and light
+        if (self.loadDipoleTrapAbsorpImag.isChecked() and j == repetitions):
+            print "Calculating optical density...\n"
+            #################################################
+            ## calculate optical density from both images
+            tshadow = np.array((Iabs-Ibg)-np.min(Iabs-Ibg)+1.0)        
+            tlight = np.array((Iref-Ibg)-np.min(Iref-Ibg)+1.0)            
+            scipy.misc.imsave(directory2+"/shadow_gray.png", tshadow)
+            scipy.misc.imsave(directory2+"/light_gray.png", tlight)                   
+            # calculate OD
+            OD = np.log(tshadow/tlight)
+            # remove negative entries from OD for plotting, more absorption will result in darger regions
+            ODplot = np.array(OD - np.min(OD))
+            OD *= (-1)
+            self.roi.setState(camObject2.ROIState, False)
+            ROI_OD = np.array(self.roi.getArrayRegion(OD, self.img))
+            self.img.setImage(ODplot)
+            self.p3.plot(ROI_OD.sum(axis=self.roiProfilePlot.currentIndex()),clear=True, pen=(1,3))
+    
+            if self.doFit.isChecked():
+                xvals = np.arange(np.shape(ROI_OD)[0])
+                yvals = ROI_OD.sum(axis=self.roiProfilePlot.currentIndex())
+                yfit = np.zeros(np.shape(ROI_OD)[0])
+                params = fitGaussianProfile(xvals, yvals, yfit)
+                self.p3.plot(yfit, pen=(2,3)) 
+                baseline = linearSlope(xvals, params[4], params[3])
+                self.p3.plot(baseline, pen=(3,3))
+                area = np.sum(yfit - baseline)
+                print "Atom number from Absorption Imaging: ", 194.1*area, "\n"
+        
+            
+               
+        # self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+        # energy3000.setModes(2,1) # lab, remote
+        # energy3000.setActiveBank(10)            
+        # energy3000.setModes(2,0) # lab, local
+        #if(self.motCurrentTTL.isChecked()):
+        #    self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b00000100000)
+    
+    # measure fluorescence counts of optically trapped atoms for different
+    # mot beam detunings
+    def imagFreqScanOpticalTrap(self):
+        self.stopVideo()
+        global time_unit
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            repetitions = self.averageSample.value()
+        else:
+            imag_freqs = np.arange(self.uimag_min.value(),self.uimag_max.value()+self.uimag_step.value(), self.uimag_step.value())
+            repetitions = len(imag_freqs)
+            self.xdata = np.zeros(0)
+            self.ydata = np.zeros(0)
+            self.yerrdata = np.zeros(0)
+                
+        readout_time = 90000
+        
+        try:
+            # switch off Kniel power supply
+            #self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+            ####### block for stopping slow sequence and starting a fast sequence##########
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
+            self.adw.Stop_Process(2)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)            
+            # since process 1 on ADWIN Gold terminates itself, it has to be restarted
+            self.adw.Start_Process(1)
+            # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+            self.adwPro2.Start_Process(1)
+            ###########################################################################
+            # set number of recaptures before reloading MOT
+            self.adw.Set_Par(46, self.noRecaptures.value())
+            self.adwPro2.Set_Par(46, self.noRecaptures.value())
+            # write important timings into ADwin variables
+            # shutter delay of 10 ms
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit2)))
+            # time for loading @ load detuning and intensities
+            self.adw.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit)))
+            self.adwPro2.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit2)))
+            # exposure time
+            self.adw.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit)))
+            self.adwPro2.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit2)))
+            # exposure time + read out time            
+            self.adw.Set_Par(15, int(math.ceil(readout_time/time_unit)))
+            self.adwPro2.Set_Par(15, int(math.ceil(readout_time/time_unit2)))
+            # optical trap time
+            self.adw.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit)))
+            self.adwPro2.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit2)))
+            # actual imaging modulation
+            self.adw.Set_FPar(31, self.imagMod.value())
+
+            # setting initial and target values
+            # for beat offset value
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            
+            # for cooler intensity
+            self.adw.Set_FPar(17, self.vcaCooler.value())                    
+            # for repumper intensity
+            self.adw.Set_FPar(18, self.vcaRepumper.value())            
+            # for dipole laser power
+            self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value()) # initial dipole power
+            self.adw.Set_FPar(23, 10)
+            # for rf driver power
+            self.adw.Set_FPar(20, self.RFdriveramp.value()) # initial rf power
+            self.adw.Set_FPar(24,5)
+            # for mot current
+            self.adw.Set_FPar(37, self.motCoilCurrent.value())
+            # for pump time
+            self.adw.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit)))
+            self.adwPro2.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit2)))
+            # set flight time
+            self.adw.Set_Par(14, int(math.floor(self.optTrapFlightTime.value()/time_unit)))
+            self.adwPro2.Set_Par(14, int(math.floor(self.optTrapFlightTime.value()/time_unit2)))
+            # imaging beam intensity
+            self.adw.Set_FPar(31, self.imagMod.value())
+            # Kniel delay
+            self.adw.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit)))
+            self.adwPro2.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit2)))
+            # recooling time
+            self.adw.Set_Par(48, int(math.ceil(self.recoolTime.value()/time_unit)))
+            self.adwPro2.Set_Par(48, int(math.ceil(self.recoolTime.value()/time_unit2)))
+
+            
+            # for ionization of atoms out of dipole trap
+            self.adw.Set_Par(44, int(self.motBeamsOnDipoleTrap.isChecked()))
+            # for data acquisition after magnetic field has been switched off
+            self.adw.Set_Par(51, int(self.daqEnable_2.isChecked()))
+                
+            # delay for switching off the current of the MOT coils
+            self.adw.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit2)))
+                            
+            self.adw.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            self.adwPro2.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            self.adw.Set_Par(37, 0)
+            self.adwPro2.Set_Par(37, 0)
+            
+            # molasse cool time
+            self.adw.Set_Par(29, int(self.molasseCoolTime_2.value()/time_unit))
+            self.adwPro2.Set_Par(29, int(self.molasseCoolTime_2.value()/time_unit2))
+            self.adw.Set_FPar(13, self.targetDetuning_2.value())
+            # variables for the ramps
+            ramptime = int(math.ceil((abs(self.vcoBeatOffset.value()-self.targetDetuning_2.value()))/0.007*self.rampingSpeed_2.value()/time_unit))
+            ramptime2 = int(math.ceil((abs(self.vcoBeatOffset.value()-self.targetDetuning_2.value()))/0.007*self.rampingSpeed_2.value()/time_unit2))
+            voltstep = 0.007/self.rampingSpeed_2.value()*time_unit
+            # total ramp time for the frequency ramp
+            self.adw.Set_Par(16, ramptime)
+            self.adwPro2.Set_Par(16, ramptime2)
+            # volt step for the frequency ramp
+            self.adw.Set_FPar(25, voltstep)
+            # backramp
+            backramptime = int(math.ceil(abs(self.imagDetuning.value()-self.targetDetuning_2.value())/(0.007*time_unit)))
+            backramptime2 = int(math.ceil(abs(self.imagDetuning.value()-self.targetDetuning_2.value())/(0.007*time_unit2)))
+            backvoltstep = 0.007*time_unit
+            # total ramp time for ramping frequency background
+            self.adw.Set_Par(50, backramptime)
+            self.adwPro2.Set_Par(50, backramptime2)
+            # volt step for back frequency ramp
+            self.adw.Set_FPar(50, backvoltstep)
+            self.adw.Set_FPar(15, self.vcaCoolerTarget_2.value())
+            self.adw.Set_FPar(16, self.vcaRepumperTarget_2.value())
+            # volt step for cooler intensity ramp
+            if ramptime == 0:
+                self.adw.Set_FPar(28, 0)
+            else:
+                self.adw.Set_FPar(28, abs((self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime))
+            # volt step for repumper intensity ramp
+            if ramptime == 0:
+                self.adw.Set_FPar(29, 0)
+            else:
+                self.adw.Set_FPar(29, abs((self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime))        
+            
+            # mot current
+            self.adw.Set_FPar(39, self.maxMOTCurrent_2.value())
+            # second argument is the number of times, the sequence will be repeated
+            # for different frequencies
+            self.adw.Set_Par(11, repetitions)
+            self.adwPro2.Set_Par(11, repetitions)
+            
+        except ADwinError, e:
+            print '***', e
+        
+        
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/DipoleTrap/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            if not os.path.exists(directory):
+                try:
+                    os.makedirs(directory)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            if not os.path.exists(directory2):
+                try:
+                    os.makedirs(directory2)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            
+            exp_params = open(directory2+"/process_parameter.txt", "w")
+            exp_params.write("PROCESSDELAY = " + str(self.adw.Get_Processdelay(1)) + "\n")
+            exp_params.write("All ADwin times in units of PROCESSDELAY!\n")
+            exp_params.write("Loading time: " + str(self.loadingTime3.value())+ "\n")
+            exp_params.write("Load Detuning [V]: " + str(self.vcoBeatOffset.value())+"\n")
+            exp_params.write("Detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.vcoBeatOffset.value())/6.0)+"\n")
+            exp_params.write("Target detuning [V]: " + str(self.targetDetuning_2.value()) + "\n")
+            exp_params.write("Target detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.targetDetuning_2.value())/6.0)+"\n")
+            exp_params.write("Frequency ramp rate [탎/0.007 V]: " + str(self.rampingSpeed_2.value())+"\n")
+            exp_params.write("Optical trapping time [탎]: " + str(self.opticaltraptime.value()) + "\n")
+            exp_params.write("Exposure time [mus]: " + str(self.exposure_time.value())+"\n")
+            exp_params.close()
+                      
+        sum_img = np.zeros(self.ROIBackground.shape)
+        # reinitialize the Background
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            self.Background_IRScatt = np.zeros(np.shape(camObject.pic))
+            
+        max_triggers = 1        
+                
+        ##################################################
+        ### prepare fluorescence collecting CCD camera
+        self.startAsyncModeROI(repetitions, self.exposure_time.value(), self.roi)
+        
+        camObject.waitForTrigger()
+        self.roi.setState(camObject.ROIState, False)
+                
+        ####################################################
+                
+        self.noUserInterrupt = True       
+        
+        # take all repetitions pictures in case of ROI Background
+        # substraction
+        j = 0
+        while (j < repetitions and self.noUserInterrupt):
+            i = 0
+            try:
+                if (j == 0):
+                    self.adw.Set_Par(77,1)
+                # imaging detuning                
+                self.adw.Set_FPar(51, imag_freqs[j])
+                # start ADwin sequence
+                self.adw.Set_Par(79, 1)
+                self.adwPro2.Set_Par(79, 1)
+                self.adwPro2.Set_Par(80,12)
+                self.adw.Set_Par(80, 12)
+            except ADwinError, e:
+                print '***', e  
+            while(i < max_triggers and self.noUserInterrupt):            
+                # in case the atoms should be imaged with absorption imaging
+                if camObject.waitForBuffer(0):
+                    tmp = np.array(camObject.returnBuffer(0))
+                    camObject.AddBufferToQueue(0)
+                    i += 1                        
+                    # substract background counts from taken image
+                    woBackGnd = tmp-self.Background_IRScatt
+                    # show taken picture wo background
+                    self.img.setImage(woBackGnd)
+                    # save taken picture wo background
+                    scipy.misc.imsave(directory2+"/fluorescence_" + str(imag_freqs[j]) + ".png", woBackGnd)
+                    ROI_woBackGnd = self.roi.getArrayRegion(woBackGnd, self.img)
+                    print "Dimensions of ROI array: ", np.shape(ROI_woBackGnd)
+                    # cloud profile in ROI without background
+                    ROI_profile = ROI_woBackGnd.sum(axis=self.roiProfilePlot.currentIndex())
+                    # show cloud profile
+                    self.p3.plot(ROI_profile,clear=True)
+                    # plot either ROI sum or max of ROI profile                        
+                    self.xdata = np.append(self.xdata,imag_freqs[j])
+                    self.ydata = np.append(self.ydata, np.sum(ROI_profile))
+                    self.yerrdata = np.append(self.yerrdata, np.sqrt(self.ydata[j]))                    
+                    self.curve.setData(self.xdata, self.ydata)
+                                                    
+                # probe fluorescence counts in dependence of imaging frequency
+                pg.QtGui.QApplication.processEvents()
+            
+            j += 1
+            print "Received triggers: ", i, "\n"        
+            if(not(self.dipoleTransferROIBackgnd.isChecked()) and j==1):
+                self.writeAnalogTimingGraph([9,6,7,10,11,8,12,14,16,13], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Dipole power [V]\t RF driver power [V]\t Beat VCO [V]\t MOT current [V]\t Imag Mod [V]\t DAQ enable [V]\t Cam TTL")
+        # all pictures are taken, postprocessing depending on 
+        # values of checkboxes
+        # 1) calculating background counts
+        if(self.dipoleTransferROIBackgnd.isChecked() and j == repetitions-1):
+            self.Background_IRScatt = np.mean(camObject.image, axis=0)
+            self.img.setImage(self.Background_IRScatt)
+            print "Number of triggers received: ", i
+            if i != max_triggers:
+                print "Error: Not all triggers received. Adjust timing!"
+        else:
+            np.savetxt(directory2+ "/data.txt",np.transpose(np.array((self.xdata, self.ydata, self.yerrdata))), header = '#MOT beam detuning [V]\t Counts in ROI wo BG\t Error\t , ROI Background Counts =' + str(np.sum(self.roi.getArrayRegion(self.Background_IRScatt, self.img))))
+               
+        self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+        energy3000.setModes(2,1) # lab, remote
+        energy3000.setActiveBank(10)            
+        energy3000.setModes(2,0) # lab, local
+        if(self.motCurrentTTL.isChecked()):
+            self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b00000100000)
+            
+    def resAbsorpImg(self):
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/AbsorptionImaging/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            if not os.path.exists(directory):
+                try:
+                    os.makedirs(directory)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            if not os.path.exists(directory2):
+                try:
+                    os.makedirs(directory2)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+        
+        # stop LiveView
+        self.stopVideo()
+        # # prepare fluorescence camera
+        self.startAsyncMode(1, self.absorpImgExpTime.value())
+        camObject.waitForTrigger()
+        # print "Buffer in signalled state before any trigger: ", camObject.waitForBuffer(0)
+        # print "Image in buffer before any trigger: ", camObject.returnBuffer(0)
+        # print "Buffer status before any trigger: ", camObject.returnBufferStatus()       
+                
+        ### prepare absorption imaging camera
+        # setting camera object's internal 2D numpy to zero for adding up exposures
+        camObject2.pic = np.zeros((camObject2.v_max, camObject2.h_max))
+        ### camera settings ###
+        # adjust IR sensitivity to low
+        camObject2.setGain('LOW')
+        #choose low read-out speed for low image noise
+        camObject2.pixel_rate(12000000)
+        # set trigger mode to [external exposure start & software trigger]
+        camObject2.setTriggerMode(2)
+        # set acquire mode to [auto]
+        camObject2.setAcquireMode(0)
+        # set exposure time in 탎
+        camObject2.exposure_time(self.absorpImgExpTime.value(),1)
+        # arm camera again
+        camObject2.arm_camera()
+        camObject2.setRecordingState(1)
+        # by default, two buffers are added to the queue
+        camObject2.addAllBufferToQueue()
+        #initialize count variable for trigger edges
+        max_triggers = 2
+        #Iabs, Iref, Ibg = 0,0, self.drkCnts
+        Iabs, Iref = 0,0
+        if hasattr(self,'drkCnts'):
+            Ibg = self.drkCnts*self.absorpImgExpTime.value()
+        else:
+            Ibg = scipy.ndimage.imread("AI_dark_cnts.png")*self.absorpImgExpTime.value()
+        max_polls = 5        
+        i = 0
+        try:
+            ####### block for stopping slow sequence and starting a fast sequence##########
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
+            self.adw.Stop_Process(2)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)            
+            ###########################################################################
+            self.adw.Set_Par(11, 1)
+            self.adwPro2.Set_Par(11, 1)            
+            # shutter opening/closing delay in ADwin time units
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit2)))
+            # loading time
+            self.adw.Set_Par(13, 0)
+            self.adwPro2.Set_Par(13, 0)
+             #trigger delay time
+            self.adw.Set_Par(53, int(math.ceil(self.trigDelayPxUsb.value()/10/time_unit)))
+            self.adwPro2.Set_Par(53, int(math.ceil(self.trigDelayPxUsb.value()/10/time_unit2)))
+            # time for exposure only
+            self.adw.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit)))
+            self.adwPro2.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit2)))
+            # time for readout only
+            self.adw.Set_Par(15, int(math.ceil(148000/time_unit)))
+            self.adwPro2.Set_Par(15, int(math.ceil(148000/time_unit2)))      
+            
+            # voltstep per ADwin time unit, so that detuning is not changed by more than 0.007 V / 탎
+            voltstep = 0.007/self.resApsorpImgRampSpeed.value()*time_unit
+            voltstep2 = 0.007/self.resApsorpImgRampSpeed.value()*time_unit2
+            # ramptime = number of voltsteps (per ADwin time unit)
+            ramp_time = max(int(math.ceil(abs(self.resVcoVolt.value()-self.vcoBeatOffset.value())/voltstep)),1)
+            ramp_time2 = max(int(math.ceil(abs(self.resVcoVolt.value()-self.vcoBeatOffset.value())/voltstep2)),1)
+            # setting the ramping time in ADWin time units
+            self.adw.Set_Par(16, ramp_time)
+            self.adwPro2.Set_Par(16, ramp_time2)
+            # setting the volt step per ADwin time unit for frequency ramp
+            self.adw.Set_FPar(25, voltstep)
+            
+            # save initial detuning
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            # set actual detuning to initial detuning
+            self.adw.Set_FPar(12,  self.vcoBeatOffset.value())
+            # set imaging detuning for resonant imaging beam
+            self.adw.Set_FPar(13,  self.resVcoVolt.value())
+            # save initial cooler and repump power
+            self.adw.Set_FPar(17, self.vcaCooler.value())
+            self.adw.Set_FPar(18, self.vcaRepumper.value())
+            # set actual cooler power
+            self.adw.Set_FPar(34, self.vcaCooler.value())
+            self.adw.Set_FPar(35, self.vcaRepumper.value())
+            # set optical pump time
+            self.adw.Set_Par(42, int(math.ceil(self.resAbsPumpTime.value()/time_unit)))
+            self.adwPro2.Set_Par(42, int(math.ceil(self.resAbsPumpTime.value()/time_unit2)))
+            # set free expansion time
+            self.adw.Set_Par(14, int(math.ceil(self.resAbsImgFlightTime.value()/time_unit)))
+            self.adwPro2.Set_Par(14, int(math.ceil(self.resAbsImgFlightTime.value()/time_unit2)))
+            self.adw.Set_FPar(31, self.imagMod.value())
+
+            # start ADwin sequence
+            self.adw.Set_Par(79, 1)
+            self.adwPro2.Set_Par(79, 1)
+            self.adw.Set_Par(80, 8)
+            self.adwPro2.Set_Par(80,8)
+            # start ADwin Gold process 1 first, because it waits for a trigger signal
+            self.adw.Start_Process(1)
+            # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+            self.adwPro2.Start_Process(1)
+            
+        except ADwinError, e:
+            print '***', e                         
+        self.noUserInterrupt=True
+        while ( i < max_triggers and self.noUserInterrupt):
+            print "Trigger ", i, "\n"
+            j = 0
+            while (not(camObject2.waitForBuffer()) and j<max_polls):
+                print "j: ", j, "\n"
+                j+=1
+                pass
+            if j==max_polls:
+                print "Max polls reached!"
+                break
+            camObject2.readOutBuffer()
+            camObject2.updateImage()
+            if (i==0):
+                Iabs = np.array(camObject2.pic,dtype=np.float64)
+            if (i==1):
+                Iref = np.array(camObject2.pic,dtype=np.float64)
+            if (i!=max_triggers-1):
+                camObject2.resetEvent()            
+            i+=1
+            if(camObject.waitForBuffer() and camObject.returnBufferStatus()):
+                camObject.pic = np.array(camObject.returnBuffer() - self.Background)         
+                    
+        print "Received triggers: ", i
+        camObject2.removeAllBufferFromQueue()
+        try:
+            self.writeAnalogTimingGraph([9,6,7,8,14], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Beat VCO [V]\t Imag Mod [V]")
+        except ADwinError, e:
+            print '***', e  
+        
+        # second argument is update=False, so that sigRegionChangeFinished is not emitted.
+        self.roi.setState(camObject.ROIState, False)
+        
+        print "Scaling factor: ", self.getScaling(self.absorpImgExpTime.value()), "\n"
+        counts = self.getScaling(self.absorpImgExpTime.value())*np.sum(self.roi.getArrayRegion(camObject.pic, self.img))
+        maxcolumndensity = np.max(self.roi.getArrayRegion(camObject.pic, self.img))
+
+        self.roi.setState(camObject2.ROIState, False)
+
+        print "Pixelfly qe: Max count in ROI = ", maxcolumndensity, "\n"
+        print "Counts in ROI with shadow: ", np.sum(self.roi.getArrayRegion(Iabs, self.img)), "\n"
+        print "Counts in ROI without shadow: ", np.sum(self.roi.getArrayRegion(Iref, self.img)), "\n"
+        
+                      
+        # normalize tshadow
+        tshadow = np.array((Iabs-Ibg)-np.min(Iabs-Ibg)+1.0)   
+        tshadow = tshadow/np.max(tshadow)
+        tshadow_ROI = self.roi.getArrayRegion(tshadow, self.img)
+        # normalize tlight
+        tlight = np.array((Iref-Ibg)-np.min(Iref-Ibg)+1.0)
+        tlight = tlight/np.max(tlight)
+        tlight_ROI = self.roi.getArrayRegion(tlight, self.img)
+        
+        #ODPlot = OpticalDensityPlot(tlight, tshadow)
+        #ODPlot.show()
+
+        
+        # calculate OD
+        OD = np.log10(tshadow/tlight)
+        offset = np.mean(self.roi2.getArrayRegion(OD, self.img))
+        OD = OD - offset
+        # remove negative entries from OD for plotting, more absorption = less counts
+        ODplot = np.array(OD - np.min(OD))
+        OD *= (-1)
+        ROI_OD = np.array(self.roi.getArrayRegion(OD, self.img))       
+        #print "Shape of ROI: ", np.shape(ROI_OD)
+        print "Max integrated OD in ROI: ", np.max(np.sum(ROI_OD, axis=self.roiProfilePlot.currentIndex()))
+        #print "I for this pixel: ", np.ravel(tshadow_ROI)[np.argmax(ROI_OD)]
+        #print "I0 for this pixel: ", np.ravel(tlight_ROI)[np.argmax(ROI_OD) ]
+        #print "I/I0 for this pixel: ", np.ravel(tshadow_ROI)[np.argmax(ROI_OD)]/np.ravel(tlight_ROI)[np.argmax(ROI_OD)], "\n"
+        
+        self.img.setImage(ODplot)
+        self.p3.plot(ROI_OD.sum(axis=self.roiProfilePlot.currentIndex()),clear=True, pen=(1,3))
+        
+        if self.resAbsImgfitGauss.isChecked():
+            yvals = ROI_OD.sum(axis=self.roiProfilePlot.currentIndex())
+            xvals = np.arange(len(yvals))
+            yfit = np.zeros(np.shape(yvals))
+            params = fitGaussianProfile(xvals, yvals, yfit)
+            self.p3.plot(yfit, pen=(2,3)) 
+            if (len(params)!=0):
+                baseline = params[3]*np.ones(np.shape(xvals))
+                self.p3.plot(baseline, pen=(3,3))
+                area = np.sum(yfit-params[3])
+                print "Amplitude of Gaussian: ", params[2]
+                print "Amplitude/Area of Gaussian: ", params[2]/area
+                print "Offset of Gaussian: ", params[3]
+                print "Std. dev. of Gaussian: ", np.sqrt(params[1])
+                print "Atom number from Absorption Imaging: ", 194.1*area, "\n"
+                print "Atom number from fluorescence: ", counts, "\n"
+            else:
+                print "Not fit possible."
+            
+               
+        #scipy.misc.imsave("OD_gray.png", OD)
+        #scipy.misc.imsave("OD_color.png", self.colorCode(OD))
+        scipy.misc.imsave(directory2+"/dark_counts.png", Ibg)
+        scipy.misc.imsave(directory2+"/shadow_gray.png", Iabs)
+        scipy.misc.imsave(directory2+"/light_gray.png", Iref)
+        #scipy.misc.imsave("shadow_gray.png", Iabs)
+        #scipy.misc.imsave("light_gray.png", Iref)
+        
+    def resAbsorpImg2(self):
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/AbsorptionImaging/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            if not os.path.exists(directory):
+                try:
+                    os.makedirs(directory)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            if not os.path.exists(directory2):
+                try:
+                    os.makedirs(directory2)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+        
+        # stop LiveView
+        self.stopVideo()
+        # # prepare fluorescence camera
+        self.startAsyncMode(1, self.absorpImgExpTime.value())
+        camObject.waitForTrigger()
+        # print "Buffer in signalled state before any trigger: ", camObject.waitForBuffer(0)
+        # print "Image in buffer before any trigger: ", camObject.returnBuffer(0)
+        # print "Buffer status before any trigger: ", camObject.returnBufferStatus()       
+                
+        ### prepare absorption imaging camera
+        # setting camera object's internal 2D numpy to zero for adding up exposures
+        camObject2.pic = np.zeros((camObject2.v_max, camObject2.h_max))
+        ### camera settings ###
+        # adjust IR sensitivity to low
+        camObject2.setGain('LOW')
+        #choose low read-out speed for low image noise
+        camObject2.pixel_rate(12000000)
+        # set trigger mode to [external exposure start & software trigger]
+        camObject2.setTriggerMode(2)
+        # set acquire mode to [auto]
+        camObject2.setAcquireMode(0)
+        # set exposure time in 탎
+        camObject2.exposure_time(self.absorpImgExpTime.value(),1)
+        # arm camera again
+        camObject2.arm_camera()
+        camObject2.setRecordingState(1)
+        # by default, two buffers are added to the queue
+        camObject2.addAllBufferToQueue()
+        #initialize count variable for trigger edges
+        max_triggers = 3
+        
+        Iabs, Iref, Ibg = 0,0,0
+        i = 0
+        try:
+            # stop slow processes and start fast processes
+            self.adw.Stop_Process(2)
+            self.adw.Start_Process(1)
+            self.adw.Set_Par(11, 1)
+            # shutter opening/closing delay in ADwin time units
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            # time for exposure only
+            self.adw.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit)))
+            # time for readout only
+            self.adw.Set_Par(15, int(math.ceil(148000/time_unit)))          
+            
+            # voltstep per ADwin time unit, so that detuning is not changed by more than 0.007 V / 탎
+            voltstep = 0.007/self.resApsorpImgRampSpeed.value()*time_unit
+            # ramptime = number of voltsteps (per ADwin time unit)
+            ramp_time = max(int(math.ceil(abs(self.resVcoVolt.value()-self.vcoBeatOffset.value())/voltstep)),1)
+            # setting the ramping time in ADWin time units
+            self.adw.Set_Par(16, ramp_time)
+            # setting the volt step per ADwin time unit for frequency ramp
+            self.adw.Set_FPar(25, voltstep)
+            
+            # loading time
+            self.adw.Set_Par(13, 0)
+            # save initial detuning
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            # set actual detuning to initial detuning
+            self.adw.Set_FPar(12,  self.vcoBeatOffset.value())
+            # set imaging detuning for resonant imaging beam
+            self.adw.Set_FPar(13,  self.resVcoVolt.value())
+            # save initial cooler and repump power
+            self.adw.Set_FPar(17, self.vcaCooler.value())
+            self.adw.Set_FPar(18, self.vcaRepumper.value())
+            # set actual cooler power
+            self.adw.Set_FPar(34, self.vcaCooler.value())
+            self.adw.Set_FPar(35, self.vcaRepumper.value())
+            # set optical pump time
+            self.adw.Set_Par(42, int(math.ceil(self.resAbsPumpTime.value()/time_unit)))
+            # set free expansion time
+            self.adw.Set_Par(14, int(math.ceil(self.resAbsImgFlightTime.value()/time_unit)))
+            self.adw.Set_FPar(31, self.imagMod.value())
+            self.adw.Set_FPar(32, self.zeemanVCA.value())
+
+            # set initialize variabel of adwin sequence
+            self.adw.Set_Par(79, 1)
+            # start sequence
+            self.adw.Set_Par(80,11)
+        except ADwinError, e:
+            print '***', e                         
+        
+        while ( i < max_triggers and self.noUserInterrupt):                
+            if camObject2.waitForBuffer():
+                print "Trigger ", i, "\n"
+                camObject2.readOutBuffer()
+                camObject2.updateImage()
+                if (i==0):
+                    Iabs = np.array(camObject2.pic,dtype=np.float64)
+                if (i==1):
+                    Iref = np.array(camObject2.pic,dtype=np.float64)
+                if (i==2):
+                    Ibg = np.array(camObject2.pic,dtype=np.float64)
+                if (i < max_triggers - 1):
+                    camObject2.resetEvent()
+                i+=1
+            if camObject.waitForBuffer(0):
+                camObject.image[0] = camObject.returnBuffer(0)
+                camObject.AddBufferToQueue(0)
+            # update GUI
+            pg.QtGui.QApplication.processEvents()
+        print "Received triggers: ", i 
+        camObject2.removeAllBufferFromQueue()
+        
+        try:
+            self.writeAnalogTimingGraph([9,6,7,8,14], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Beat VCO [V]\t Imag Mod [V]")
+        except ADwinError, e:
+            print '***', e  
+        
+        # second argument is update=False, so that sigRegionChangeFinished is not emitted.
+        self.roi.setState(camObject.ROIState, False)
+        if(camObject.waitForBuffer() and camObject.returnBufferStatus()):
+            camObject.pic = np.array(camObject.returnBuffer() - self.Background)
+        print "Scaling factor: ", self.getScaling(self.absorpImgExpTime.value()), "\n"
+        counts = self.getScaling(self.absorpImgExpTime.value())*np.sum(self.roi.getArrayRegion(camObject.pic, self.img))
+        self.roi.setState(camObject2.ROIState, False)
+        
+        print "Counts in ROI with shadow: ", np.sum(self.roi.getArrayRegion(Iabs, self.img)), "\n"
+        print "Counts in ROI without shadow: ", np.sum(self.roi.getArrayRegion(Iref, self.img)), "\n"
+        
+        
+        # normalize tshadow
+        #tshadow = np.array((Iabs-Ibg)-np.min(Iabs-Ibg)+1E-6)        
+        tshadow = np.array(Iabs-Ibg)
+        tshadow = tshadow/np.max(tshadow)
+        # normalize tlight
+        #tlight = np.array((Iref-Ibg)-np.min(Iref-Ibg)+1E-6)
+        tlight = np.array(Iref-Ibg)
+        tlight = tlight/np.max(tlight)
+                        
+        # calculate OD
+        OD = np.log(tshadow/tlight)
+        # remove negative entries from OD for plotting, more absorption = less counts
+        ODplot = np.array(OD - np.min(OD))
+        OD *= (-1)
+        ROI_OD = np.array(self.roi.getArrayRegion(OD, self.img))       
+        
+                
+        if self.onlyROIPlot.isChecked():
+            self.img.setImage(ODplot)
+            self.p3.plot(ROI_OD.sum(axis=1),clear=True, pen=(1,3))
+        else:
+            self.img.setImage(OD)
+            self.p3.plot(OD.sum(axis=1), clear=True, pen=(1,3))
+        
+        if self.resAbsImgfitGauss.isChecked():
+            if(self.onlyROIPlot.isChecked()):
+                xvals = np.arange(np.shape(ROI_OD)[0])
+                yvals = ROI_OD.sum(axis=1)
+                yfit = np.zeros(np.shape(ROI_OD)[0])
+            else:
+                xvals = np.arange(np.shape(OD)[0])
+                yvals = OD.sum(axis=1)
+                yfit = np.zeros(np.shape(OD)[0])
+            params = fitGaussianProfile(xvals, yvals, yfit)
+            self.p3.plot(yfit, pen=(2,3)) 
+            if (len(params)!=0):
+                baseline = params[3]*np.ones(np.shape(xvals))
+                self.p3.plot(baseline, pen=(3,3))
+                area = np.sum(yfit-params[3])
+                print "Amplitude of Gaussian: ", params[2]
+                print "Amplitude/Area of Gaussian: ", params[2]/area
+                print "Offset of Gaussian: ", params[3]
+                print "Std. dev. of Gaussian: ", np.sqrt(params[1])
+                print "Atom number from Absorption Imaging: ", 194.1*area, "\n"
+                print "Atom number from fluorescence: ", counts, "\n"
+            else:
+                print "Not fit possible."
+            
+               
+        #scipy.misc.imsave("OD_gray.png", OD)
+        #scipy.misc.imsave("OD_color.png", self.colorCode(OD))
+        scipy.misc.imsave(directory2+"/shadow_gray.png", tshadow)
+        scipy.misc.imsave(directory2+"/light_gray.png", tlight)
+        #scipy.misc.imsave("shadow_gray.png", Iabs)
+        #scipy.misc.imsave("light_gray.png", Iref)
+            
+    def resAbsorpImgFreqScan(self):
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/AbsorptionImaging/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            if not os.path.exists(directory):
+                try:
+                    os.makedirs(directory)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            if not os.path.exists(directory2):
+                try:
+                    os.makedirs(directory2)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+        # for plotting
+        imag_freqs = np.arange(self.uimag_min.value(),self.uimag_max.value()+self.uimag_step.value(), self.uimag_step.value())
+        repetitions = len(imag_freqs)
+        self.xdata = np.zeros(repetitions)
+        self.ydata = np.zeros(repetitions)
+        self.roi.setState(camObject2.ROIState, False)
+        self.img.setImage(camObject2.pic)
+        ROIProfiles = np.empty(0)
+                
+        # stop LiveView
+        self.stopVideo()
+        
+        if (self.checkFluorescence.isChecked()):
+            ##################################################
+            ### prepare fluorescence collecting CCD camera
+            self.startAsyncMode(1, self.exposure_time.value())
+            camObject.waitForTrigger()
+            max_triggers = 1
+            ####################################################
+        else:
+            ### prepare absorption imaging camera
+            # setting camera object's internal 2D numpy to zero for adding up exposures
+            camObject2.pic = np.zeros((camObject2.v_max, camObject2.h_max))
+            ### camera settings ###
+            # adjust IR sensitivity to high
+            camObject2.setGain('LOW')
+            #choose low read-out speed for low image noise
+            camObject2.pixel_rate(12000000)
+            # set trigger mode to [external exposure start & software trigger]
+            camObject2.setTriggerMode(2)
+            # set acquire mode to [auto]
+            camObject2.setAcquireMode(0)
+            # set exposure time in 탎
+            camObject2.exposure_time(self.absorpImgExpTime.value(),1)
+            # arm camera again
+            camObject2.arm_camera()
+            camObject2.setRecordingState(1)
+            # by default, two buffers re added to the queue
+            camObject2.addAllBufferToQueue()
+            #initialize count variable for trigger edges
+            max_triggers = 2
+                
+        if hasattr(self,'drkCnts'):
+            Ibg = self.drkCnts*self.absorpImgExpTime.value()
+        else:
+            Ibg = scipy.ndimage.imread("AI_dark_cnts.png")*self.absorpImgExpTime.value()
+        Iabs, Iref = 0,0
+        
+        try:
+            ####### block for stopping slow sequence and starting a fast sequence##########
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
+            self.adw.Stop_Process(2)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)            
+            # since process 1 on ADWIN Gold terminates itself, it has to be restarted
+            self.adw.Start_Process(1)
+            # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+            self.adwPro2.Start_Process(1)
+            ###########################################################################
+            self.adw.Set_Par(11, repetitions)
+            self.adwPro2.Set_Par(11, repetitions)
+            # shutter opening/closing delay in ADwin time units
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit2)))
+            self.adw.Set_Par(37, int(not(self.checkFluorescence.isChecked())))
+            self.adwPro2.Set_Par(37, int(not(self.checkFluorescence.isChecked())))
+            # time for exposure only
+            self.adw.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit)))
+            # time for readout only
+            self.adw.Set_Par(15, int(math.ceil(148000/time_unit)))                 
+            
+            # shutter delay of 10 ms
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            # time for loading @ load detuning and intensities
+            self.adw.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit)))
+            
+            # optical trap time
+            self.adw.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit)))
+            
+            # setting initial and target values
+            # for beat offset value
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            
+            # for cooler intensity
+            self.adw.Set_FPar(17, self.vcaCooler.value())                    
+            # for repumper intensity
+            self.adw.Set_FPar(18, self.vcaRepumper.value())            
+            # for dipole laser power
+            self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value()) #initial
+            self.adw.Set_FPar(23, 10) #max
+            # for rf driver power
+            self.adw.Set_FPar(20, self.RFdriveramp.value()) # initial rf power
+            self.adw.Set_FPar(24,5)
+            # for pump time
+            self.adw.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit)))
+            # Kniel delay
+            self.adw.Set_Par(39, int(math.ceil(self.knielDelayTime.value()/time_unit)))
+            
+            # absorption imaging detuning of MOT beams
+            self.adw.Set_FPar(51, self.imagDetuning.value())
+                                        
+            # delay for switching off the current of the MOT coils
+            self.adw.Set_Par(45, int(math.ceil(self.currentOffDelay.value()/time_unit)))
+                                       
+            # molasse cool time
+            self.adw.Set_Par(29, int(self.molasseCoolTime_2.value()/time_unit))
+            self.adw.Set_FPar(13, self.targetDetuning_2.value())
+            
+                        
+            # variables for the frequency ramp
+            ramptime = int(math.ceil(abs((self.vcoBeatOffset.value()-self.targetDetuning_2.value())))/0.007*self.rampingSpeed_2.value()/time_unit)
+            voltstep = 0.007/self.rampingSpeed_2.value()*time_unit
+            # setting the ramping time in ADWin time units
+            self.adw.Set_Par(16, ramptime)
+            # setting the volt step per ADwin time unit for frequency ramp
+            self.adw.Set_FPar(25, voltstep)           
+            
+            self.adw.Set_FPar(15, self.vcaCoolerTarget_2.value())
+            self.adw.Set_FPar(16, self.vcaRepumperTarget_2.value())
+            # volt step for cooler intensity ramp
+            if ramptime == 0:
+                self.adw.Set_FPar(28, 0)
+            else:
+                self.adw.Set_FPar(28, abs(self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime)
+            # volt step for repumper intensity ramp
+            if ramptime == 0:
+                self.adw.Set_FPar(29, 0)
+            else:
+                self.adw.Set_FPar(29, abs(self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime)
+                  
+            # save initial detuning
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            # set actual detuning to initial detuning
+            self.adw.Set_FPar(12,  self.vcoBeatOffset.value())
+            
+            # save initial cooler and repump power
+            self.adw.Set_FPar(17, self.vcaCooler.value())
+            self.adw.Set_FPar(18, self.vcaRepumper.value())
+            # set actual cooler power
+            self.adw.Set_FPar(34, self.vcaCooler.value())
+            self.adw.Set_FPar(35, self.vcaRepumper.value())
+            #adjust intensity of imaging beam
+            self.adw.Set_FPar(31, self.imagMod.value())
+        except ADwinError, e:
+            print '***', e 
+        
+        self.noUserInterrupt = True
+        
+        j = 0
+        
+        for freq in imag_freqs:
+            self.adw.Set_FPar(51, freq)            
+            
+            if (j == 0):
+                self.adw.Set_Par(77,1)
+                
+            i = 0
+            # set initialize variable of adwin sequence
+            self.adw.Set_Par(79, 1)
+            # start sequence
+            self.adw.Set_Par(80,12)                                
+            
+            while ( i < max_triggers and self.noUserInterrupt):                
+                if (self.checkFluorescence.isChecked()):
+                    if camObject.waitForBuffer(0):
+                        camObject.image[0] = camObject.returnBuffer(0)
+                        camObject.AddBufferToQueue(0)
+                        i+=1                        
+                else:
+                    if camObject2.waitForBuffer():
+                        print "Trigger ", i, "\n"
+                        camObject2.readOutBuffer()
+                        camObject2.updateImage()
+                        if (i==0):
+                            Iabs = np.array(camObject2.pic)
+                        if (i==1):
+                            Iref = np.array(camObject2.pic)
+                        if (j<repetitions-1):
+                            camObject2.resetEvent()
+                        i+=1
+                
+                # update GUI
+                pg.QtGui.QApplication.processEvents()
+            print "Received triggers: ", i 
+            
+            if j==0 and self.saveAnalogOutGraph.isChecked():
+                try:
+                    self.writeAnalogTimingGraph([9,6,7,10,11,8,12,14,16,13], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Dipole power [V]\t RF driver power [V]\t Beat VCO [V]\t MOT current [V]\t Imag Mod [V]\t DAQ enable [V]\t Cam TTL")
+                except ADwinError, e:
+                    print '***', e  
+            
+            
+            if self.checkFluorescence.isChecked():
+                # substract background counts from taken fluorescence image
+                woBackGnd = np.array(camObject.image[0]-self.Background_IRScatt)
+                # show taken image wo background
+                self.img.setImage(woBackGnd)
+                self.roi.setState(camObject.ROIState, False)
+                ROI_woBackGnd = self.roi.getArrayRegion(woBackGnd, self.img) 
+                # cloud profile in ROI without background
+                ROI_profile = ROI_woBackGnd.sum(axis=self.roiProfilePlot.currentIndex())
+                # show cloud profile
+                self.p3.plot(ROI_profile,clear=True)
+                self.xdata = np.roll(self.xdata, -1)
+                self.ydata = np.roll(self.ydata,-1)
+                self.xdata[-1] = freq
+                self.ydata[-1] = np.max(ROI_profile)
+                
+                self.curve.setData(self.xdata, self.ydata)
+            elif i==max_triggers:                
+                # normalize tshadow
+                tshadow = np.array((Iabs-Ibg)-np.min(Iabs-Ibg)+1.0)   
+                tshadow = tshadow/np.max(tshadow)
+                tshadow_ROI = self.roi.getArrayRegion(tshadow, self.img)
+                # normalize tlight
+                tlight = np.array((Iref-Ibg)-np.min(Iref-Ibg)+1.0)
+                tlight = tlight/np.max(tlight)
+                tlight_ROI = self.roi.getArrayRegion(tlight, self.img)
+                        
+                # calculate OD
+                OD = np.log10(tshadow/tlight)
+                offset = np.mean(self.roi2.getArrayRegion(OD, self.img))
+                OD = OD - offset
+                OD *= (-1)
+                ROI_OD = np.array(self.roi.getArrayRegion(OD, self.img))    
+                roiprofile = np.sum(ROI_OD, axis=self.roiProfilePlot.currentIndex())
+                self.img.setImage(OD)
+                scipy.misc.imsave(directory2+"/shadow_VCO_volt_" + str(freq) + ".png", tshadow)
+                scipy.misc.imsave(directory2+"/light_VCO_volt_" + str(freq) + ".png", tlight)
+                scipy.misc.imsave(directory2+"/OD_VCO_volt_" + str(freq) + ".png", OD)
+                # plot the profile of the cloud
+                self.p3.plot(roiprofile,clear=True)
+                self.xdata = np.roll(self.xdata, -1)
+                self.ydata = np.roll(self.ydata,-1)
+                # plotting the maximum integrated OD in a ROI
+                self.xdata[-1] = freq
+                self.ydata[-1] = np.max(roiprofile)
+                self.curve.setData(self.xdata, self.ydata)
+                ROIProfiles = np.append(ROIProfiles, roiprofile)
+                j+=1
+            
+            pg.QtGui.QApplication.processEvents()            
+            
+            if not(self.noUserInterrupt):
+                if not(self.checkFluorescence.isChecked()):
+                    camObject2.removeAllBufferFromQueue()
+                break   
+            
+        if not(self.checkFluorescence.isChecked()):
+            camObject2.removeAllBufferFromQueue()
+            imag_freqs = np.reshape(imag_freqs[:j], (j, 1))
+            ROIProfiles = np.reshape(ROIProfiles, (j, len(roiprofile)))
+            np.savetxt(directory2+"/freq_vs_roi_profile_od.txt", np.concatenate((imag_freqs, ROIProfiles), axis=1), header = '#MOT beam detuning [V]\t ROI OD profile')
+        np.savetxt(directory2+ "/data.txt",np.transpose(np.array((self.xdata, self.ydata))), header = '#MOT beam detuning [V]\t Max of ROI OD profile')
+        
+        
+                
+## this function might not properly work!!!
+    def measureLifetimeInOpticalTrap(self):
+        self.stopVideo()
+        global time_unit
+        
+        #optTrapTimes = np.arange(self.opticaltraptime.value(), self.optMaxTime.value()+self.optTimeStep.value(), self.optTimeStep.value())
+        
+        repetitions = len(optTrapTimes)
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            width, height = map(int, self.roi.size())
+            # in order to be compatible with getArrayRegion
+            self.Background_IRScatt = np.zeros((repetitions, width+1, height+1))
+        
+        
+        if self.loadDipoleTrapAbsorpImag.isChecked():
+            readout_time = 148000
+        else:
+            readout_time = 90000
+        
+        try:
+            # switch off Kniel power supply
+            #self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+            self.adw.Stop_Process(2)
+            self.adw.Start_Process(1)
+            # set number of recaptures before reloading MOT
+            self.adw.Set_Par(46, self.noRecaptures.value())
+            # write important timings into ADwin variables
+            # shutter delay of 10 ms
+            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
+            # time for loading @ load detuning and intensities
+            self.adw.Set_Par(13, int(math.ceil(self.loadingTime3.value()/time_unit)))
+            # molasse cool time
+            self.adw.Set_Par(29, int(self.molasseCoolTime_2.value()/time_unit))
+            # exposure time
+            self.adw.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit)))
+            # exposure time + read out time            
+            self.adw.Set_Par(15, int(math.ceil(readout_time/time_unit)))
+            # actual imaging modulation
+            self.adw.Set_FPar(31, self.imagMod.value())
+
+            # setting initial and target values
+            # for beat offset value
+            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
+            self.adw.Set_FPar(13, self.targetDetuning_2.value())
+            
+            # for cooler intensity
+            self.adw.Set_FPar(17, self.vcaCooler.value())
+            self.adw.Set_FPar(15, self.vcaCoolerTarget_2.value())        
+            # for repumper intensity
+            self.adw.Set_FPar(18, self.vcaRepumper.value())
+            self.adw.Set_FPar(16, self.vcaRepumperTarget_2.value())
+            # for dipole laser power
+            self.adw.Set_FPar(19, self.fiberLaserAnalogIn.value()) # initial dipole power
+            self.adw.Set_FPar(23, 10)
+            # for rf driver power
+            self.adw.Set_FPar(20, self.RFdriveramp.value()) # initial rf power
+            self.adw.Set_FPar(24,5)
+            # for mot current
+            self.adw.Set_FPar(37, self.motCoilCurrent.value())
+            # for pump time
+            self.adw.Set_Par(42, int(math.ceil(self.optPumpTime.value()/time_unit)))
+            # set flight time
+            self.adw.Set_Par(14, int(math.ceil(self.optTrapFlightTime.value()/time_unit)))
+            # imaging beam intensity
+            self.adw.Set_FPar(31, self.imagMod.value())
+            # imaging beam frequency
+            self.adw.Set_FPar(32, self.zeemanVCA.value())
+            # Kniel delay
+            self.adw.Set_Par(39, self.knielDelayTime.value())
+
+            # variables for the ramps
+            ramptime = int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/0.007*self.rampingSpeed_2.value()/time_unit))
+            voltstep = 0.007/self.rampingSpeed_2.value()*time_unit
+            # total ramp time for the frequency ramp
+            self.adw.Set_Par(16, ramptime)
+            # volt step for the frequency ramp
+            self.adw.Set_FPar(25, voltstep)
+            # backramp
+            backramptime = int(math.ceil((self.imagDetuning.value()-self.targetDetuning_2.value())/(0.007*time_unit)))
+            backvoltstep = 0.007*time_unit
+            # total ramp time for ramping frequency background
+            self.adw.Set_Par(50, backramptime)
+            # volt step for back frequency ramp
+            self.adw.Set_FPar(50, backvoltstep)
+            # imaging detuning
+            self.adw.Set_FPar(51, self.imagDetuning.value())
+            
+            # volt step for cooler intensity ramp
+            if ramptime == 0:
+                self.adw.Set_FPar(28, 0)
+            else:
+                self.adw.Set_FPar(28, abs((self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime))
+            # volt step for repumper intensity ramp
+            if ramptime == 0:
+                self.adw.Set_FPar(29, 0)
+            else:
+                self.adw.Set_FPar(29, abs((self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime))
+
+            self.adw.Set_Par(36, int(self.dipoleTransferROIBackgnd.isChecked()))
+            self.adw.Set_Par(37, int(self.loadDipoleTrapAbsorpImag.isChecked()))
+            
+            # mot current
+            self.adw.Set_FPar(39, self.maxMOTCurrent_2.value())
+            # number of times sequence will be repeated
+            self.adw.Set_Par(11, repetitions)
+            
+        except ADwinError, e:
+            print '***', e
+
+        # create filename
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/Lifetime of atoms in optical trap/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            if not os.path.exists(directory):
+                try:
+                    os.makedirs(directory)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            if not os.path.exists(directory2):
+                try:
+                    os.makedirs(directory2)
+                except OSError as exc: # Guard against race condition
+                    if exc.errno != errno.EEXIST:
+                        raise
+            
+            exp_params = open(directory2+"/process_parameter.txt", "w")
+            exp_params.write("PROCESSDELAY = " + str(self.adw.Get_Processdelay(1)) + "\n")
+            exp_params.write("All ADwin times in units of PROCESSDELAY!\n")
+            exp_params.write("Loading time: " + str(self.loadingTime3.value())+ "\n")
+            exp_params.write("Load Detuning [V]: " + str(self.vcoBeatOffset.value())+"\n")
+            exp_params.write("Detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.vcoBeatOffset.value())/6.0)+"\n")
+            exp_params.write("Target detuning [V]: " + str(self.targetDetuning_2.value()) + "\n")
+            exp_params.write("Target detuning [units of Gamma]: " + str(self.detuningFromVoltage(self.targetDetuning_2.value())/6.0)+"\n")
+            exp_params.write("Frequency ramp rate [탎/0.007 V]: " + str(self.rampingSpeed_2.value())+"\n")
+            exp_params.write("Optical trapping time [탎]: " + str(self.opticaltraptime.value()) + "\n")
+            exp_params.write("Exposure time [mus]: " + str(self.exposure_time.value())+"\n")
+            exp_params.close()
+            orientation = {0: "vert", 1:"hori"}
+
+        # preparing the power supply for sequence mode
+        
+        # ######configuration of Kniel sequence 
+        # # switch off power supply in order to change control mode (done, since Par_80 = 0)
+        # energy3000.setModes(3,1) # sequence, remote
+        # # step 1: 60 A for (2* shutter_delay + loading_time - ramp_time)
+        # # step 2: 120 A for (ramp_time)
+        # # step 3: 0 A for molassecooltime + opticaltraptime +0.025 + exposure_and_readout
+        
+        # current_seq = {0:{'TIME':2*self.ovenShutterDelay.value()*1E-6+self.loadingTime3.value()*1E-6-1.379, 'SV':35, 'SC':60,'SP':3060, 'BANK':10, 'TYPE':0, 'MODE':0}, 1:{'TIME':(ramptime*time_unit+self.molasseCoolTime_2.value()+self.optPumpTime.value()+self.opticaltraptime.value()+25+self.exposure_time.value()+0.5*self.readOutDelay.value())*1E-6 , 'SV':35, 'SC':120,'SP':3060, 'BANK':11, 'TYPE':0, 'MODE':0}, 2:{'TIME':0.5*self.readOutDelay.value()*1E-6, 'SV':35, 'SC':60,'SP':3060, 'BANK':12, 'TYPE':0, 'MODE':0}}
+        # if (self.reloadKniel.isChecked()):
+            # energy3000.seq = current_seq
+            # energy3000.writeSequence(current_seq)
+            # self.knielTable.updateTable()
+        # energy3000.setModes(3,0) # sequence, local        
+        # ############################
+        
+        
+        #initialize count variable for trigger edges
+        max_triggers = 2
+        if hasattr(self,'drkCnts'):
+            Ibg = self.drkCnts*self.absorpImgExpTime.value()
+        else:
+            Ibg = scipy.ndimage.imread("AI_dark_cnts.png")*self.absorpImgExpTime.value()
+        Iabs, Iref = 0,0
+                            
+        max_polls = 5        
+        doAbsImg = self.loadDipoleTrapAbsorpImag.isChecked()
+        ##################################################
+        ### prepare fluorescence collecting CCD camera
+        self.startAsyncMode(max_triggers, self.exposure_time.value())
+        camObject.waitForTrigger()
+        ####################################################
+                
+        self.xdata = np.zeros(repetitions)
+        self.ydata = np.zeros(repetitions)
+        countsMOT = np.zeros(repetitions)
+        countsDipoleTrap = np.zeros(repetitions)
+        
+        self.noUserInterrupt = True
+        j = 0
+        
+        for traptime in optTrapTimes:            
+            try:
+                # optical trap time
+                self.adw.Set_Par(22, int(math.ceil(traptime/time_unit)))
+                self.adw.Set_Par(79, 1) 
+                # start ADwin sequence    
+                self.adw.Set_Par(80, 10)
+            except ADwinError, e:
+                print '***', e            
+            # take all repetitions pictures in case of ROI Background
+            # substraction
+            i = 0
+            while(i < max_triggers and self.noUserInterrupt):    
+                print "Trigger count: ", i, "\n"
+                if camObject.waitForBuffer(0):
+                    camObject.image[i] = camObject.returnBuffer(0)
+                    camObject.AddBufferToQueue(0)
+                    # take background counts
+                    i += 1                          
+                        
+                pg.QtGui.QApplication.processEvents()
+            print "Received triggers: ", i, "\n"
+            
+            if (self.dipoleTransferROIBackgnd.isChecked()):
+                self.Background += camObject.image[0]
+                self.img.setImage(camObject.image[1])
+                self.Background_IRScatt[j] += self.roi.getArrayRegion(camObject.image[1], self.img)
+            else:            
+                # counts from fluorescence of MOT, background substracted, whole CCD
+                atomsInMOT = np.array(camObject.image[0]-self.Background)
+                # counts from fluorescence within ROI after Optical Trapping, background substracted
+                self.img.setImage(camObject.image[1])
+                ROI_atomsAfterTransfer = self.roi.getArrayRegion(camObject.image[1], self.img) - self.Background_IRScatt[j]
+                
+                # save mot picture before optical trap loading
+                #scipy.misc.imsave(directory2+"/atoms_in_mot.png", atomsInMOT)
+                # save picture of atoms after optical trap time
+                scipy.misc.imsave(directory2+"/dipole_trap_" + str(traptime) + "_mus_opt_trap_time.png",  ROI_atomsAfterTransfer)
+                # show taken image wo background
+                ROI_atomsInMOT = self.roi2.getArrayRegion(atomsInMOT, self.img) 
+                self.xdata = np.roll(self.xdata, -1)
+                self.ydata = np.roll(self.ydata,-1)
+                countsMOT[j] = np.sum(ROI_atomsAfterTransfer)
+                countsDipoleTrap[j] = np.sum(ROI_atomsInMOT)
+                self.xdata[-1] = traptime
+                self.ydata[-1] = countsDipoleTrap[j]/countsMOT[j]
+                self.curve.setData(self.xdata, self.ydata)
+                spatialProfileMOT = np.sum(ROI_atomsInMOT, axis=self.roiProfilePlot.currentIndex())
+                spatialProfile = np.sum(ROI_atomsAfterTransfer, axis=self.roiProfilePlot.currentIndex())
+                self.p3.plot(spatialProfile,clear=True)
+                # save cloud profile in MOT
+                np.savetxt(directory2+"/MOT_" + orientation[self.roiProfilePlot.currentIndex()]+ "_profile.txt", (np.arange(0, len(spatialProfileMOT)), spatialProfileMOT), delimiter='\t', header='#pixel\t Counts')
+                # save cloud profile in dipole trap
+                np.savetxt(directory2+"/dipole_trap_" + orientation[self.roiProfilePlot.currentIndex()]+ "_profile_after_" + str(int(traptime/1000.0))+ "_ms_traptime.txt", (np.arange(0, len(spatialProfile)), spatialProfile), delimiter='\t', header='#pixel\t Counts')
+            j+=1
+            pg.QtGui.QApplication.processEvents()
+        
+        if (self.dipoleTransferROIBackgnd.isChecked()):
+            self.Background = self.Background / repetitions
+        
+        if(not(self.dipoleTransferROIBackgnd.isChecked())):
+            np.savetxt(directory2+"/transfer_efficiencies.txt", np.array(zip(self.xdata, countsMOT, countsDipoleTrap)), header="# Optical trap time [mus]\t ROI Counts MOT\t ROI Counts Dipole Trap")        
+            time.sleep(0.5)
+            self.writeAnalogTimingGraph([9,6,7,10,11,8,12,14,16,13], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Dipole power [V]\t RF driver power [V]\t Beat VCO [V]\t MOT current [V]\t Imag Mod [V]\t DAQ enable [V]\t Cam TTL")
+        self.adw.Set_Par(3, self.adw.Get_Par(3) & 0b11111011111)
+        energy3000.setModes(2,1) # lab, remote
+        energy3000.setActiveBank(10)            
+        energy3000.setModes(2,0) # lab, local
+        if(self.motCurrentTTL.isChecked()):
+            self.adw.Set_Par(3, self.adw.Get_Par(3) | 0b00000100000)
+            
 
     def countAtomsAfterCompression(self):
         self.stopVideo()
         global time_unit
+        
+        #create some directories
+        today = time.strftime("%d%m")+time.strftime("%Y")[2:]
+        directory = "Y:/Experimental Control/Python Experimental Control/Measurements/Compression/"+today
+        directory2 = directory + time.strftime("/%Hh_%Mm")
+                               
+        if not os.path.exists(directory):
+            try:
+                os.makedirs(directory)
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
+
+        if not os.path.exists(directory2):
+            try:
+                os.makedirs(directory2)
+            except OSError as exc: # Guard against race condition
+                if exc.errno != errno.EEXIST:
+                    raise
+        
+        if(self.loadDipoleTrapAbsorpImag.isChecked()):
+            readout_time = 148000
+        else:
+            readout_time = 90000
+        
         try:
             self.adw.Stop_Process(2)
             self.adw.Start_Process(1)
             # write important timings into ADwin variables
             # shutter delay of 10 ms
-            self.adw.Set_Par(12, int(math.ceil(10000/time_unit)))
+            self.adw.Set_Par(12, int(math.ceil(700000/time_unit)))
             # time for loading @ load detuning and intensities
             self.adw.Set_Par(13, self.loadingTime3.value())
             # exposure time
             self.adw.Set_Par(25, int(math.ceil(self.exposure_time.value()/time_unit)))
-            # exposure time + read out time
-            self.adw.Set_Par(15, int(math.ceil((90000+self.exposure_time.value())/time_unit)))
-            # optical trap time
-            self.adw.Set_Par(22, int(math.ceil(self.opticaltraptime.value()/time_unit)))
+            # read out time
+            self.adw.Set_Par(15, int(math.ceil((readout_time)/time_unit)))
+            
 
             # setting initial and target values
             # for beat offset value
@@ -1262,76 +3935,156 @@ class MainGUIThread(QtGui.QMainWindow):
             # for repumper intensity
             self.adw.Set_FPar(18, self.vcaRepumper.value())
             self.adw.Set_FPar(16, self.vcaRepumperTarget_2.value())
-            # for dipole laser power
-            self.adw.Set_FPar(19, 1)
-            self.adw.Set_FPar(23, 10)
-            # for rf driver power
-            self.adw.Set_FPar(20, 0)
-            self.adw.Set_FPar(24,5)
+            # imaging beam intensity
+            self.adw.Set_FPar(31, self.imagMod.value())
+            
 
-            # variables for the ramps
+            # frequency ramp time in ADwin time units
             ramptime = int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/0.007*self.rampingSpeed_2.value()/time_unit))
             voltstep = 0.007/self.rampingSpeed_2.value()*time_unit
             # total ramp time for the frequency ramp
             self.adw.Set_Par(16, ramptime)
             # volt step for the frequency ramp
             self.adw.Set_FPar(25, voltstep)
+            # backramp
+            backramptime = int(math.ceil((self.vcoBeatOffset.value()-self.targetDetuning_2.value())/(0.007*time_unit)))
+            backvoltstep = 0.007*time_unit
+            # total ramp time for ramping frequency background
+            self.adw.Set_Par(50, backramptime)
+            # volt step for back frequency ramp
+            self.adw.Set_FPar(50, backvoltstep)
+            # set flight time
+            self.adw.Set_Par(14, int(math.floor(self.optTrapFlightTime.value()/time_unit)))
+            
             # volt step for cooler intensity ramp
             if ramptime == 0:
                 self.adw.Set_FPar(28, 0)
             else:
-                self.adw.Set_FPar(28, (self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime)
+                self.adw.Set_FPar(28, abs((self.vcaCooler.value()-self.vcaCoolerTarget_2.value())/ramptime))
             # volt step for repumper intensity ramp
             if ramptime == 0:
                 self.adw.Set_FPar(29, 0)
             else:
-                self.adw.Set_FPar(29, (self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime)
-            # volt step for fiber laser intensity ramp
-            ramptime = int(math.ceil(self.dipolelaserramptime.value()/time_unit))
-            if ramptime == 0:
-                self.adw.Set_FPar(30, 0)
-            else:
-                self.adw.Set_FPar(30, float(9.0/ramptime))
-
-            # number of times sequence will be repeated
-            self.adw.Set_Par(11, self.repetitions_2.value())
-            
+                self.adw.Set_FPar(29, abs((self.vcaRepumper.value()-self.vcaRepumperTarget_2.value())/ramptime))
+                
+            self.adw.Set_Par(37, int(self.loadDipoleTrapAbsorpImag.isChecked()))
+                                    
         except ADwinError, e:
             print '***', e
 
         times = np.zeros(self.fieldSize.value())
         counts = np.zeros(self.fieldSize.value())
-        #counts_plot = pg.plot()       
+        counts_plot = pg.plot()       
 
-
-        self.startAsyncMode(1, self.exposure_time.value())
+        if (self.loadDipoleTrapAbsorpImag.isChecked()):
+            ######################################################
+            ### prepare absorption imaging camera
+            # setting camera object's internal 2D numpy to zero for adding up exposures
+            camObject2.pic = np.zeros((camObject2.v_max, camObject2.h_max))
+            ### camera settings ###
+            # adjust IR sensitivity to low
+            camObject2.setGain('LOW')
+            #choose low read-out speed for low image noise
+            camObject2.pixel_rate(12000000)
+            # set trigger mode to [external exposure start & software trigger]
+            camObject2.setTriggerMode(2)
+            # set acquire mode to [auto]
+            camObject2.setAcquireMode(0)
+            # set exposure time in 탎
+            camObject2.exposure_time(self.exposure_time.value(),1)
+            # arm camera again
+            camObject2.arm_camera()
+            camObject2.setRecordingState(1)
+            # by default, two buffers are added to the queue
+            camObject2.addAllBufferToQueue()
+            #initialize count variable for trigger edges
+            max_triggers = 2
+            if hasattr(self,'drkCnts'):
+                Ibg = self.drkCnts*self.absorpImgExpTime.value()
+            else:
+                Ibg = scipy.ndimage.imread("AI_dark_cnts.png")*self.absorpImgExpTime.value()
+            Iabs, Iref = 0,0
+            max_polls = 5
+        else:
+            self.startAsyncMode(1, self.exposure_time.value())
+        
         start_time = time.clock()
 
         try:
+            self.noUserInterrupt = True
             self.adw.Set_Par(79, 1) # to initialize variables of the ADwin section
-            self.adw.Set_Par(80, 5)
-            while(self.adw.Get_Par(80) == 5):
-                camObject.waitForTrigger()
-                if camObject.waitForBuffer(0):
-                    camObject.image[0] = camObject.returnBuffer(0)
-                    camObject.resetEvent(0)
-                    times[-1] = (time.clock() - start_time)
-                    counts[-1] = (np.sum(camObject.image[0]) - self.backgroundCounts)
-                    self.curve.setData(times, counts)
-                    camObject.img.setImage(camObject.image[0])
-                    #counts_plot.plot(times, counts)
-                    times = np.roll(times, -1)
-                    counts = np.roll(counts,-1)
-                    pg.QtGui.QApplication.processEvents()
-            if self.adw.Get_Par(78) == 1: #in case, sequence has to be interrupted
-                self.adw.Set_Par(78,0)
-                self.adw.Stop_Process(1)
-                self.adw.Start_Process(2)
-                self.startVideo()
+            self.adw.Set_Par(80, 5)            
+            if(self.loadDipoleTrapAbsorpImag.isChecked()):
+                i = 0
+                while(i < max_triggers and self.noUserInterrupt): 
+                    j = 0
+                    while (not(camObject2.waitForBuffer()) and j<max_polls):
+                        j+=1
+                        pass
+                    if j==max_polls:
+                        print "Max polls reached!"
+                        break
+                    camObject2.readOutBuffer()
+                    camObject2.updateImage()
+                    if (i==0):
+                        Iabs = np.array(camObject2.pic,dtype=np.float64)
+                    if (i==1):
+                        Iref = np.array(camObject2.pic,dtype=np.float64)
+                    if (i!=max_triggers-1):
+                        camObject2.resetEvent()
+                    i += 1
+                print "Number of triggers received: ", i, "\n"
+            else:                
+                while(self.noUserInterrupt):
+                    camObject.waitForTrigger()
+                    if camObject.waitForBuffer(0):
+                        camObject.image[0] = camObject.returnBuffer(0)
+                        camObject.AddBufferToQueue(0)
+                        # show cloud profile
+                        ROI_profile = (self.roi.getArrayRegion(camObject.image[0], self.img)).sum(axis=1)
+                        self.p3.plot(ROI_profile,clear=True)                        
+                        times[-1] = (time.clock() - start_time)
+                        counts[-1] = (np.sum(ROI_profile))
+                        self.curve.setData(times, counts)
+                        self.img.setImage(camObject.image[0])
+                        counts_plot.plot(times, counts)
+                        times = np.roll(times, -1)
+                        counts = np.roll(counts,-1)
+                        pg.QtGui.QApplication.processEvents()
         except ADwinError, e:
             print '***', e
    
+        if (self.loadDipoleTrapAbsorpImag.isChecked() and i==max_triggers):
+            #################################################
+            ## calculate optical density from both images
+            tshadow = np.array((Iabs-Ibg)-np.min(Iabs-Ibg)+1.0)        
+            tlight = np.array((Iref-Ibg)-np.min(Iref-Ibg)+1.0)
+            scipy.misc.imsave(directory2+"/shadow_compression.png", Iabs)
+            scipy.misc.imsave(directory2+"/light_compression.png", Iref)
+            # calculate OD
+            OD = np.log(tshadow/tlight)
+            # remove negative entries from OD for plotting, more absorption will result in darger regions
+            ODplot = np.array(OD - np.min(OD))
+            OD *= (-1)
+            ROI_OD = np.array(self.roi.getArrayRegion(OD, self.img))
+            self.img.setImage(ODplot)
+            self.p3.plot(ROI_OD.sum(axis=1),clear=True, pen=(1,3))
         
+            if self.doFit.isChecked():
+                xvals = np.arange(np.shape(ROI_OD)[0])
+                yvals = ROI_OD.sum(axis=1)
+                yfit = np.zeros(np.shape(ROI_OD)[0])
+                params = fitGaussianProfile(xvals, yvals, yfit)
+                if len(params) != 0:
+                    self.p3.plot(yfit, pen=(2,3))             
+                    baseline = params[3]*np.ones(np.shape(xvals))
+                    self.p3.plot(baseline, pen=(3,3))
+                    area = np.sum(yfit - baseline)
+                    print "Atom number from Absorption Imaging: ", 194.1*area, "\n"
+                else:
+                    print "No fit."
+         
+        self.writeAnalogTimingGraph([9,6,7,10,11,8,12,14], directory2 + "/analogtiminggraph.csv", "Time [ADwin unit]\t Cooler VCA [V]\t Repump VCA [V]\t Dipole power [V]\t RF driver power [V]\t Beat VCO [V]\t MOT current [V]\t Imag Mod [V]")
 
     def startReverseReleaseRecapture(self):
         self.stopVideo()
@@ -1411,7 +4164,7 @@ class MainGUIThread(QtGui.QMainWindow):
                     camObject.waitForTrigger()
                     if camObject.waitForBuffer(0):
                         camObject.image[i] = camObject.returnBuffer(0)
-                        camObject.resetEvent(0)
+                        camObject.AddBufferToQueue(0)
                         i += 1
                     if self.adw.Get_Par(78) == 1: #in case, sequence has to be interrupted
                         self.adw.Set_Par(78,0)
@@ -1430,15 +4183,15 @@ class MainGUIThread(QtGui.QMainWindow):
 
             # the first array of each of the two following two dimensional arrays, contains
             # the average of all taken images, while the second array contains its variance
-            beforeExpansion = np.zeros((2,camObject.spatialROIBackground.size))
-            afterCooling = np.zeros((2,camObject.spatialROIBackground.size))
+            beforeExpansion = np.zeros((2,self.spatialROIBackground.size))
+            afterCooling = np.zeros((2,self.spatialROIBackground.size))
             # using Welford's method to compute mean and standard variance
             for k in range(self.repetitions2.value()):
-                #camObject.img.setImage(camObject.image[2*k])
-                img1 = camObject.roi.getArrayRegion(camObject.image[2*k], camObject.img)
-                value1 = np.maximum(img1.mean(axis=1) - camObject.spatialROIBackground,0)
-                img2 = camObject.roi.getArrayRegion(camObject.image[2*k+1], camObject.img)
-                value2 = np.maximum(img2.mean(axis=1) - camObject.spatialROIBackground,0)
+                #self.img.setImage(camObject.image[2*k])
+                img1 = self.roi.getArrayRegion(camObject.image[2*k], self.img)
+                value1 = np.maximum(img1.mean(axis=1) - self.spatialROIBackground,0)
+                img2 = self.roi.getArrayRegion(camObject.image[2*k+1], self.img)
+                value2 = np.maximum(img2.mean(axis=1) - self.spatialROIBackground,0)
                 #extract profile of cloud before expansion
                 tmpM = beforeExpansion[0]
                 beforeExpansion[0] += (value1 - tmpM)/(k+1)
@@ -1454,7 +4207,7 @@ class MainGUIThread(QtGui.QMainWindow):
                 beforeExpansion[1] = np.sqrt(beforeExpansion[0])
                 afterCooling[1] = np.sqrt(afterCooling[0])
             
-            xtmp = np.arange(camObject.spatialROIBackground.size) + 1 
+            xtmp = np.arange(self.spatialROIBackground.size) + 1 
 
                         
             for k in range(2):
@@ -1528,8 +4281,8 @@ class MainGUIThread(QtGui.QMainWindow):
             camObject.waitForTrigger()
             if camObject.waitForBuffer(0):
                 camObject.image[0] = camObject.returnBuffer(0)
-                camObject.resetEvent(0)
-                camObject.img.setImage(camObject.image[0])           
+                camObject.AddBufferToQueue(0)
+                self.img.setImage(camObject.image[0])           
             pg.QtGui.QApplication.processEvents()
                 
     def stopAsyncMode(self):
@@ -1610,7 +4363,7 @@ class MainGUIThread(QtGui.QMainWindow):
                     camObject.image[i] = camObject.returnBuffer(0)
                     #print time.clock()-start
                     i = i+1
-                    camObject.resetEvent(0)                       
+                    camObject.AddBufferToQueue(0)                       
             self.adw.Start_Process(1)
         except ADwinError, e:
             print '***', e
@@ -1653,7 +4406,7 @@ class MainGUIThread(QtGui.QMainWindow):
             self.vcoBeatOffset.setValue(float(volt))
             self.vcoBeatOffset.setAnalogOutput() #caution: mind that the voltage is
             # not set too fast, so that the lockpoint doesn't change
-            self.getScaling()
+            self.getScaling(self.aSyncmodeExptime.value())
 
             # prior to each measurement substract
             # background counts
@@ -1670,7 +4423,7 @@ class MainGUIThread(QtGui.QMainWindow):
                     camObject.waitForTrigger()
                     if camObject.waitForBuffer(0):
                         camObject.image[i] = camObject.returnBuffer(0)
-                        camObject.resetEvent(0)
+                        camObject.AddBufferToQueue(0)             
                         i += 1
             except ADwinError, e:
                 print '***', e
@@ -1695,7 +4448,7 @@ class MainGUIThread(QtGui.QMainWindow):
                     if camObject.waitForBuffer(0):
                         #print "Picture: ", i
                         camObject.image[i] = camObject.returnBuffer(0)
-                        camObject.resetEvent(0)
+                        camObject.AddBufferToQueue(0)
                         i += 1
             except ADwinError, e:
                 print '***', e
@@ -1724,7 +4477,7 @@ class MainGUIThread(QtGui.QMainWindow):
             print '***', e
         self.backgroundCounts = tmp
         self.startVideo()
-        self.getScaling()
+        self.getScaling(self.exposureTime.value()*1000)
                     
         
     def startWavelengthScan(self):
@@ -1780,7 +4533,7 @@ class MainGUIThread(QtGui.QMainWindow):
         xtmp = np.delete(self.xdata,-1)
         ytmp = np.delete(self.ydata,-1)
         opts, covs = curve_fit(easierFit, xtmp, ytmp)
-        L,R = opts[0], optrs[1]
+        L,R = opts[0], opts[1]
         opts, covs = curve_fit(atomNumber, self.xdata, self.ydata, p0 = (L,R))
         L,R = tuple(opts)
         print "Loss rate R = ", R, " atoms/s"
@@ -1792,9 +4545,13 @@ class MainGUIThread(QtGui.QMainWindow):
 
     def fitLoadingRate2(self):
         global linearSlope
-        #self.stopVideo()
-        xtmp = np.delete(self.xdata,-1)
-        ytmp = np.delete(self.ydata,-1)
+        self.stopVideo()
+        print self.noOfPointsDeleted.value()
+        print len(self.xdata)
+        xtmp = np.delete(self.xdata[self.xdata > 0],np.arange(self.noOfPointsDeleted.value()))
+        ytmp = np.delete(self.ydata[self.xdata > 0],np.arange(self.noOfPointsDeleted.value()))
+        print len(xtmp)
+        print len(ytmp)
         opts, covs = curve_fit(linearSlope, xtmp, ytmp)
         a = opts[0]
         b = opts[1]
@@ -1807,28 +4564,35 @@ class MainGUIThread(QtGui.QMainWindow):
     # returns detuning from resonance in MHz, when locked to a certain
     # zero crossing
     def detuningFromVoltage(self,volt):
-        return (9.84*volt-16.5)
+        return (10.22*volt-38.46)
     
     # input = detuning in MHz, output = scattering rate in MHz
     def scatterRate(self, detuning):
         s0 = self.saturation.value()
-        return s0*18.499/(1+s0+math.pow(detuning/18.499,2))
-
-    def getScaling(self):
-        exp_time = 0
-        if camObject.mode == 0x31: # video mode internal trigger
-            exp_time = self.exposureTime.value()
-        elif camObject.mode == 0x10: # Sync Extern Trigger mode
-            exp_time = self.aSyncmodeExptime.value() # must be given in ms
+        return s0*18.499/(1+s0+math.pow(2*np.pi*detuning/18.499,2))
+    
+    # the exposure time is given in ms
+    def getScaling(self, exp_time):
+        # exp_time = 0
+        # if camObject.mode == 0x31: # video mode internal trigger
+            # exp_time = self.exposureTime.value()
+        # elif camObject.mode == 0x10: # Sync Extern Trigger mode
+            # exp_time = self.aSyncmodeExptime.value() # must be given in ms
+        cntsperphoton = 1
+        if camObject.mode == 0x31:
+            cntsperphoton = 0.0962
+        elif camObject.mode == 0x10:
+            cntsperphoton = 0.226        
         delta = self.detuningFromVoltage(self.vcoBeatOffset.value())
-        #self.conversionFactor = (4*math.pi/4.37)*1E3/(6.6261*4.46799804*3.25*self.scatterRate(delta)*exp_time)
+        self.conversionFactor = (4*math.pi/4.37)*1E3/(cntsperphoton*self.scatterRate(delta)*exp_time)
         #update for ccd cam with filter
-        self.conversionFactor = (4*math.pi/4.37)*1E3/(6.6261*4.46799804*2.24*self.scatterRate(delta)*exp_time)
-        print self.conversionFactor
+        #self.conversionFactor = (4*math.pi/4.37)*1E3/(6.6261*4.46799804*2.24*self.scatterRate(delta)*exp_time)
+        print "Conversion factor: ", self.conversionFactor
+        return self.conversionFactor
 
     def calculateScaling(self):
         if self.automaticScaling.isChecked():
-            self.getScaling()
+            self.getScaling(self.exposureTime.value()*1000)
         else:
             self.conversionFactor = self.scaling.value()
             
@@ -1843,29 +4607,38 @@ class MainGUIThread(QtGui.QMainWindow):
         self.img.setImage(self.camChoices[self.camChoice.currentIndex()].pic)
         # update profile plot
         selected = self.roi.getArrayRegion(self.camChoices[self.camChoice.currentIndex()].pic, self.img)
-        self.p3.plot(selected.sum(axis=1),clear=True)
-        # update plot of roisum
-        roisum = self.sumROI(self.camChoices[self.camChoice.currentIndex()].pic)
-        if self.takeBackgroundCounts:
-            if self.backgroundCounter > 0:
-                self.tmp += roisum
-                self.backgroundCounter -= 1
-            else:
-                self.takeBackgroundCounts = False
-                self.backgroundCounts = float(self.tmp)/self.averageSample.value()
-        elif self.takeAverageCounts:
-            if self.averageCounter > 0:
-                self.tmp += roisum
-                self.averageCounter -= 1
-            else:
-                self.takeAverageCounts = False
-                self.averageCounts = float(self.tmp)/self.averageSample.value() - self.backgroundCounts
-                self.averageCount.display(self.averageCounts/1E7*self.conversionFactor)
-
+        self.p3.plot(selected.sum(axis=self.roiProfilePlot.currentIndex()),clear=True)
+        
         self.xdata = np.roll(self.xdata, -1)
         self.ydata = np.roll(self.ydata,-1)
         self.xdata[-1] = (time.clock() - self.start_time)
-        self.ydata[-1] = (roisum - self.backgroundCounts)*self.conversionFactor
+        # decide if to plot the sum of all pixels in ROI, or the maximum of
+        # the ROI profile (horizontal or vertical)
+        if (self.plotOptions.currentIndex() == 0):
+            plotQuantity = self.sumROI(self.camChoices[self.camChoice.currentIndex()].pic)
+            if self.takeBackgroundCounts:
+                if self.backgroundCounter > 0:
+                    self.tmp += plotQuantity
+                    self.backgroundCounter -= 1
+                else:
+                    self.takeBackgroundCounts = False
+                    self.backgroundCounts = float(self.tmp)/self.averageSample.value()
+            elif self.takeAverageCounts:
+                if self.averageCounter > 0:
+                    self.tmp += plotQuantity
+                    self.averageCounter -= 1
+                else:
+                    self.takeAverageCounts = False
+                    self.averageCounts = float(self.tmp)/self.averageSample.value() - self.backgroundCounts
+                    self.averageCount.display(self.averageCounts/1E7*self.conversionFactor)
+            self.ydata[-1] = (plotQuantity - self.backgroundCounts)*self.conversionFactor            
+        else:
+            plotQuantity = np.max(selected.sum(axis=self.roiProfilePlot.currentIndex()))
+            self.ydata[-1] = plotQuantity
+            
+        # update plot of roisum
+        #roisum = self.sumROI(self.camChoices[self.camChoice.currentIndex()].pic)
+        
         self.curve.setData(self.xdata, self.ydata)
        
     def updatedROI(self):
@@ -1946,6 +4719,8 @@ class MainGUIThread(QtGui.QMainWindow):
         if self.camChoice.currentIndex() == 1:
             camObject2.live = True 
             self.startStream.setStyleSheet(self.stylesheets[camObject2.live])
+            # set IR sensitivity to low
+            camObject2.setGain('LOW')
             # set trigger mode to 
             camObject2.setTriggerMode(0)
             # arming the camera
@@ -1962,11 +4737,13 @@ class MainGUIThread(QtGui.QMainWindow):
             camObject.live = False
             self.startStream.setStyleSheet(self.stylesheets[camObject.live])
             camObject.stopCamera()
+            camObject.q.queue.clear()
             self.dataStream.quit()
         if self.camChoice.currentIndex() == 1:
             camObject2.live = False
             self.startStream.setStyleSheet(self.stylesheets[camObject.live])
             camObject2.stopCamera()
+            camObject2.q.queue.clear()
             self.dataStream2.quit()
                        
     def startExtTriggerMode(self):
@@ -1980,6 +4757,11 @@ class MainGUIThread(QtGui.QMainWindow):
     def takeDrkCnts(self):
         # stop LiveView
         self.stopVideo()
+        
+        # prepare fluorescence camera
+        # self.startAsyncMode(1, self.absorpImgExpTime.value())
+        # camObject.waitForTrigger()
+        
         # setting camera object's internal 2D numpy to zero for adding up exposures
         camObject2.pic = np.zeros((camObject2.v_max, camObject2.h_max))
         ### camera settings ###
@@ -1991,56 +4773,80 @@ class MainGUIThread(QtGui.QMainWindow):
         camObject2.setTriggerMode(2)
         # set acquire mode to [auto]
         camObject2.setAcquireMode(0)
+        # set exposure time in 탎
+        camObject2.exposure_time(self.absorpImgExpTime.value(),1)
         # arm camera again
         camObject2.arm_camera()
         camObject2.setRecordingState(1)
         camObject2.addAllBufferToQueue()
-        # initialize count variable for trigger edges
-        i = 0
+        #initialize count variable for trigger edges
+        i, j = 0,0
         max_triggers = self.darkCntAvg.value()
+        max_polls = 5
         ### writing ADwin into variables ###
         try:
-            # stop slow processes and start fast processes
+            ####### block for stopping slow sequence and starting a fast sequence##########
+            # stops ADWin Pro II process 2, which sends event signal for process 2 on ADwin Gold
+            self.adwPro2.Stop_Process(2)
             self.adw.Stop_Process(2)
-            self.adw.Start_Process(1)
+            # set ending condition to false
+            self.adw.Set_Par(78,0)
+            self.adwPro2.Set_Par(78,0)
+            # set sequences into waiting loop
+            self.adw.Set_Par(80,0)
+            self.adwPro2.Set_Par(80,0)            
+            ###########################################################################
+            
+            # delay of oven shutter
+            self.adw.Set_Par(12, int(math.floor(self.ovenShutterDelay.value()/time_unit)))
+            self.adwPro2.Set_Par(12, int(math.floor(self.ovenShutterDelay.value()/time_unit2)))
+            
             # number of exposures for averaging the counts
             self.adw.Set_Par(11, max_triggers)
+            self.adwPro2.Set_Par(11, max_triggers)
+            # exposure time
+            self.adw.Set_Par(25, int(math.floor((self.absorpImgExpTime.value())/(time_unit))))
+            self.adwPro2.Set_Par(25, int(math.floor((self.absorpImgExpTime.value())/time_unit2)))
+            
             # time for exposure and readout in ADwin time units
-            self.adw.Set_Par(15, int(math.ceil((self.absorpImgExpTime.value()+137000)/(time_unit))))
-            # set initialize variabel of adwin sequence
+            self.adw.Set_Par(15, int(math.floor(148000/time_unit)))
+            self.adwPro2.Set_Par(15, int(math.floor(148000/time_unit2)))
+            # set initialize variable of adwin sequence
             self.adw.Set_Par(79, 1)
+            self.adwPro2.Set_Par(79, 1)
             # start sequence
+            self.adwPro2.Set_Par(80,7)
             self.adw.Set_Par(80,7)
+            # start process 1 on ADWIN Gold first, because it waits for trigger
+            self.adw.Start_Process(1)
+            # starts ADwin Pro II process 1, which sends event signals for process 1 on ADwin GOLD
+            self.adwPro2.Start_Process(1)
+
         except ADwinError, e:
             print '***', e
-        while ( i < max_triggers and self.adw.Get_Par(80) == 7):
-            # wait for buffer being in signalled state, the buffer index is stored
-            # in self.buffer_numbers, which is by default an array of size 2
-            while not(camObject2.waitForBuffer()):
-                pass
-            camObject2.readOutBuffer()
-            # read out image and add it up
-            camObject2.updateImage(True)
-            camObject2.resetEvent()
-            i += 1
+        
+        self.noUserInterrupt = True
+        while ( i < max_triggers and self.noUserInterrupt):
+            if(camObject2.waitForBuffer()):
+                camObject2.readOutBuffer()
+                # read out image and add it up to previous image
+                camObject2.updateImage(True)
+                camObject2.resetEvent()
+                i += 1
+            pg.QtGui.QApplication.processEvents()
         print "Received triggers: ", i
         camObject2.removeAllBufferFromQueue()
         if i != 0:
             camObject2.pic /= i
         # plot averaged dark count picture
         self.img.setImage(camObject2.pic)
+                
+        # save whole ccd picture divided by exposure time
+        self.drkCnts = np.array(camObject2.pic, dtype=np.float64)/self.absorpImgExpTime.value()
+        scipy.misc.imsave("AI_dark_cnts.png", self.drkCnts)
+        print "Mean dark counts (per mus): ", np.mean(self.drkCnts)
         
-        # save whole ccd picture
-        self.drkCnts = camObject2.pic
-        # saving the ROI dark count background
-        self.ROIDrkCnts = self.roi.getArrayRegion(camObject2.pic, self.img)
-        # start again slow processes
-        try:
-            self.adw.Stop_Process(1)
-            self.adw.Start_Process(2)
-        except ADwinError, e:
-            print '***', e
-    
+        
     def alignImagingBeam(self):
         # stop LiveView
         self.stopVideo()
@@ -2064,7 +4870,7 @@ class MainGUIThread(QtGui.QMainWindow):
             # setting the volt step per ADwin time unit for frequency ramp
             self.adw.Set_FPar(25, voltstep)
             # time for exposure and readout in ADwin time units
-            self.adw.Set_Par(15, int(math.ceil((self.absorpImgExpTime.value()+90000)/(time_unit))))
+            self.adw.Set_Par(15, int(math.ceil((self.absorpImgExpTime.value()+148000)/(time_unit))))
             
             # set initialize variabel of adwin sequence
             self.adw.Set_Par(79, 1)
@@ -2078,134 +4884,7 @@ class MainGUIThread(QtGui.QMainWindow):
         camObject.readImage(0)
         camObject.updateImage()
         self.img.setImage(camObject.pic)
-        camObject.resetEvent(0)
-        # start again slow processes
-        try:
-            self.adw.Stop_Process(1)
-            self.adw.Start_Process(2)
-        except ADwinError, e:
-            print '***', e
-    '''
-    takes an 2d numpy array as argument and saves it into a color coded picture
-    '''
-    def colorCode(self, gray_image, filename, red_limit = 0.8, blue_limit = 0.4):
-        abs_max = np.max(np.abs(gray_image))
-        abs_min = np.min(np.abs(gray_image))
-        red = np.array(gray_image)
-        red[red < red_limit*(abs_max-abs_min)+abs_min] = 0.0
-        blue = np.array(gray_image)
-        blue[blue > blue_limit*(abs_max-abs_min)+abs_min] = 0.0
-        green = np.array(gray_image)
-        green[(green <= blue_limit*(abs_max-abs_min)+abs_min) | \
-              (green >= red_limit*(abs_max-abs_min)+abs_min)] = 0.0
-        rgb = np.array((red,green,blue))
-        try:
-            scipy.misc.imsave(filename, rgb)
-        except IOError:
-            print "Could not save rgb image!"
-    
-    def resAbsorpImg(self):
-        # stop LiveView
-        self.stopVideo()
-        ### prepare absorption imaging camera
-        # setting camera object's internal 2D numpy to zero for adding up exposures
-        camObject2.pic = np.zeros((camObject2.v_max, camObject2.h_max))
-        ### camera settings ###
-        # adjust IR sensitivity to low
-        camObject2.setGain('LOW')
-        #choose low read-out speed for low image noise
-        camObject2.pixel_rate(12000000)
-        # set trigger mode to [external exposure control]
-        camObject2.setTriggerMode(2)
-        # set acquire mode to [auto]
-        camObject2.setAcquireMode(0)
-        # arm camera again
-        camObject2.arm_camera()
-        camObject2.setRecordingState(1)
-        # by default, two buffers are added to the queue
-        camObject2.addAllBufferToQueue()
-        # initialize count variable for trigger edges
-        i = 0
-        max_triggers = 2
-        try:
-            # stop slow processes and start fast processes
-            self.adw.Stop_Process(2)
-            self.adw.Start_Process(1)
-            self.adw.Set_Par(11, max_triggers)
-            # shutter opening/closing delay in ADwin time units
-            self.adw.Set_Par(12, int(math.ceil(self.ovenShutterDelay.value()/time_unit)))
-            # time for exposure and readout in ADwin time units
-            self.adw.Set_Par(15, int(math.ceil((self.absorpImgExpTime.value()+137000)/(time_unit))))
-            # time for exposure only
-            self.adw.Set_Par(25, int(math.ceil(self.absorpImgExpTime.value()/time_unit)))
-            # time for readout only
-            self.adw.Set_Par(41, int(math.ceil(500000/time_unit)))          
-            
-            # voltstep per ADwin time unit, so that detuning is not changed by more than 0.007 V / 탎
-            voltstep = 0.007/self.resApsorpImgRampSpeed.value()*time_unit
-            # ramptime = number of voltsteps (per ADwin time unit)
-            ramp_time = max(int(math.ceil((self.resVcoVolt.value()-self.vcoBeatOffset.value())/voltstep)),1)
-            # setting the ramping time in ADWin time units
-            self.adw.Set_Par(16, ramp_time)
-            # setting the volt step per ADwin time unit for frequency ramp
-            self.adw.Set_FPar(25, voltstep)
-            
-            # save initial detuning
-            self.adw.Set_FPar(11, self.vcoBeatOffset.value())
-            # set actual detuning to initial detuning
-            self.adw.Set_FPar(12,  self.vcoBeatOffset.value())
-            # set red detuning for resonant imaging beam
-            self.adw.Set_FPar(13,  self.resVcoVolt.value())
-            
-            
-            # set initialize variabel of adwin sequence
-            self.adw.Set_Par(79, 1)
-            # start sequence
-            self.adw.Set_Par(80,8)
-        except ADwinError, e:
-            print '***', e        
-            
-        Iabs, Iref, Ibg = 0,0, self.drkCnts
-        j = 0
-        max_polls = 10  
-        
-        while ( i < max_triggers and self.adw.Get_Par(80) == 8):
-            # wait for buffer being in signalled state, the buffer index is stored
-            # in self.buffer_numbers, which is by default an array of size 2
-            
-            while not(camObject2.waitForBuffer() and j < max_polls):
-                j += 1
-                pass
-            camObject2.readOutBuffer()
-            # read out image and add it up
-            if (i==0):
-                camObject2.updateImage()
-                Iabs = camObject2.pic
-            if (i == 1):
-                camObject2.updateImage()
-                Iref = camObject2.pic
-            camObject2.resetEvent()
-            i += 1
-        print "Received triggers: ", i 
-        camObject2.removeAllBufferFromQueue()
-        
-        scipy.misc.imsave("shadow_gray.png", Iabs)
-        self.colorCode(Iabs, "Y:\Experimental Control\Python Experimental Control\shadow.png")
-        scipy.misc.imsave("light_gray.png", Iref)
-        self.colorCode(Iref, "Y:\Experimental Control\Python Experimental Control\light.png")
-        # plot transmission signal in ROI
-        t1 = (Iabs-Ibg)
-        t2 = (Iref-Ibg)
-        print "Ibg: ", Ibg
-        print "np.mean(Iabs): ", np.mean(Iabs)
-        print "np.mean(Iref): ", np.mean(Iref)
-        print "np.mean(t1): ", np.mean(t1)
-        print "np.mean(t2): ", np.mean(t2)
-        tres = t2/t1
-        print "tres: ", tres
-        self.img.setImage(np.log(tres))
-        # plot profile of transmission signal
-        self.p3.plot(tres.sum(axis=1),clear=True)
+        camObject.AddBufferToQueue(0)
         
         # start again slow processes
         try:
@@ -2213,7 +4892,9 @@ class MainGUIThread(QtGui.QMainWindow):
             self.adw.Start_Process(2)
         except ADwinError, e:
             print '***', e
+                  
             
+              
     # yet to be implemented for both cams
     def startAsyncMode(self, repetitions, exposure):
         camObject.stopCamera()
@@ -2221,6 +4902,15 @@ class MainGUIThread(QtGui.QMainWindow):
         camObject.setHIGain()
         camObject.setExposure(exposure)
         camObject.image = np.zeros((repetitions, camObject.ccdysize, camObject.ccdxsize))
+        camObject.AddAllBufferToQueue()
+        camObject.startCamera()
+    def startAsyncModeROI(self, repetitions, exposure, this_roi):
+        camObject.stopCamera()
+        camObject.setMode(0x10) # external async mode, exposure time in mus
+        camObject.setHIGain()
+        camObject.setExposure(exposure)
+        width, height = map(int, this_roi.size())
+        camObject.image = np.zeros((repetitions, width+1, height+1))
         camObject.AddAllBufferToQueue()
         camObject.startCamera()
         
@@ -2234,6 +4924,10 @@ class MainGUIThread(QtGui.QMainWindow):
         self.averageCounter = self.averageSample.value()
     def resetBackgroundCounts(self):
         self.backgroundCounts = 0
+        self.ROIBackground = np.zeros(np.shape(self.ROIBackground))
+        self.spatialROIBackground = np.zeros(self.ROIBackground.shape[1])
+        self.Background = np.zeros(np.shape(self.Background))
+        self.Background_IRScatt = np.zeros(np.shape(self.Background_IRScatt))
 
     def displayDetuning(self):
         self.specAnalyzer.readDetuning()
@@ -2275,8 +4969,8 @@ class MainGUIThread(QtGui.QMainWindow):
         # self.u = self.time_unit_dict[text]
         # self.save_settings['Exposure time'] = t
         # self.save_settings['Time unit']= self.u
-        # self.save_settings['ROI position'] = camObject.roi.pos()
-        # self.save_settings['ROI size'] = camObject.roi.size()
+        # self.save_settings['ROI position'] = self.roi.pos()
+        # self.save_settings['ROI size'] = self.roi.size()
         # pickle.dump(self.save_settings, open( fname, "wb" ) )
         # return   
         pass

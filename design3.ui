@@ -7,14 +7,14 @@
     <x>0</x>
     <y>0</y>
     <width>709</width>
-    <height>372</height>
+    <height>756</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QTableWidget" name="table">
+   <widget class="QTableWidget" name="sequenceSteps">
     <property name="geometry">
      <rect>
       <x>10</x>
@@ -22,6 +22,68 @@
       <width>691</width>
       <height>311</height>
      </rect>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="addStep">
+    <property name="geometry">
+     <rect>
+      <x>40</x>
+      <y>330</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>add Step</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="delStep">
+    <property name="geometry">
+     <rect>
+      <x>130</x>
+      <y>330</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>delete Step</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="transSteps">
+    <property name="geometry">
+     <rect>
+      <x>220</x>
+      <y>330</y>
+      <width>101</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>transfer Steps</string>
+    </property>
+   </widget>
+   <widget class="QTableWidget" name="bankParameters">
+    <property name="geometry">
+     <rect>
+      <x>10</x>
+      <y>380</y>
+      <width>691</width>
+      <height>281</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="transBankParams">
+    <property name="geometry">
+     <rect>
+      <x>40</x>
+      <y>670</y>
+      <width>141</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>transfer Bank Parameters</string>
     </property>
    </widget>
   </widget>
