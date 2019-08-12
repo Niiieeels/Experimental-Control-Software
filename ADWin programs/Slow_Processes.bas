@@ -1,10 +1,9 @@
 '<ADbasic Header, Headerversion 001.001>
 ' Process_Number                 = 2
-' Initial_Processdelay           = 1
-' Eventsource                    = Timer
+' Initial_Processdelay           = 10000
+' Eventsource                    = External
 ' Control_long_Delays_for_Stop   = No
-' Priority                       = Low
-' Priority_Low_Level             = 1
+' Priority                       = High
 ' Version                        = 1
 ' ADbasic_Version                = 6.2.0
 ' Optimize                       = Yes
@@ -12,6 +11,14 @@
 ' Stacksize                      = 1000
 ' Info_Last_Save                 = PF-KURZ  PF-KURZ\mot-user
 '<Header End>
+#if ADwin_SYSTEM = ADWIN_PROII then
+#Include ADwinPro_All.Inc
+#define TTLStateProLight Par_3
+#define eventclock Par_4
+#define time_interval_slow Par_6
+#endif
+
+#if ADwin_SYStem = ADwin_Gold then
 Import Math.li9
 
 #define offset_0V 32768
@@ -42,9 +49,13 @@ dim wiggle_vals[100] as float
 #define wiggle_max FPar_32
 #define frequency FPar_33
 #define wiggle_ch Par_32
-
-
 #define totalvolt FPar_30
+
+#EndIf
+
+#define analogChannel Par_1
+#define analogVal FPar_1
+#define analogOutputChange Par_2
 
 Function ADCVolt16(digits, kv) As Float
   ADCVolt16 = (digits*(20.0/65536) - 10)/kv
@@ -55,9 +66,20 @@ Function ADCDigits16(adc_volt, kv) As Long
 EndFunction
 
 INIT:
-  CONF_DIO(12) 'Set first 16 DIO-channels to input'
-  PROCESSDELAY = 1          'for T9 one unit of time (low priority) is 100 탎
+   
+#If Processor = T12 Then 'time unit for LOW priority = 1 ns
+  'PROCESSDELAY = 10000 ' 10 탎
+  CPU_Dig_IO_Config(110010b)'DIG I/O - 1 as output
+  cpu_digout(1,0)
+  eventclock = 0
+  time_interval_slow = 10
+  'all 31 TTL channels as output
+  'P2_DigProg(3,0011b)
+#EndIf
   
+#If Processor = T9 Then
+  CONF_DIO(12) 'Set first 16 DIO-channels to input'
+  PROCESSDELAY = 400 ' 400* 0.025 탎
   for array_index = 1 to 4000
     data_1[array_index] = 0
     data_2[array_index] = 0
@@ -76,11 +98,23 @@ INIT:
   
   Set_Mux(1010000000b) 'set mux for 1st measurement, channels 1 + 2, with factor 4 amplification
   Sleep(65) ' in units of 100 ns
+#EndIf
   
   
 EVENT:
+
+#If ADwin_system = ADwin_ProII then
+  'send an event signal for 10 탎 each 100 탎 to ADwin Gold
+  if (eventclock < 1) then cpu_digout(1,1)
+  if (eventclock >= 1) then cpu_digout(1,0)
+  inc eventclock
+  if (eventclock = time_interval_slow) then eventclock = 0    
+#endif  
+  
   selectcase Par_80:
     case 0:
+
+#If ADwin_system = ADWIN_GOld Then     
       Start_Conv(11b) 'takes 5 탎
       Set_Mux(001001b)'setting multiplexer to channels 3+4, takes max. 6.5 탎
       Wait_EOC(11b)
@@ -123,11 +157,23 @@ EVENT:
       
       'this takes 0.2 탎
       Digout_Word(TTLstate)
+#endif
+
+#if processor = t12 then
+      P2_Digout_Long(3, TTLStateProLight)
+#EndIf
+      
       IF (analogOutputChange = 1) THEN 
+#If Processor = T9 Then
         DAC(analogChannel,ADCDigits16(analogVal,1))
+#EndIf
+#If Processor = T12 Then
+        p2_DAC(1, analogChannel, ADCDigits16(analogVal,1))
+#EndIf
         analogOutputChange = 0
       ENDIF
       
+#If Processor = T9 Then      
     case 1: 'apply a sinusoidal wiggle to a given analog output
       if (initialize = 1) then
         for array_index = 1 to 100
@@ -149,5 +195,6 @@ EVENT:
         clock = 0
       endif
       inc clock
+#EndIf
   endselect
   
